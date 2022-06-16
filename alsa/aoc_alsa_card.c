@@ -1706,7 +1706,7 @@ static void init_headset_jack(struct snd_soc_card *card,
 	}
 
 	/* setup hs jack */
-	err = snd_soc_card_jack_new(card, "Headset Jack",
+	err = snd_soc_card_jack_new_pins(card, "Headset Jack",
 		SND_JACK_HEADSET | SND_JACK_BTN_0 |
 		SND_JACK_BTN_1 | SND_JACK_BTN_2 |
 		SND_JACK_BTN_3, &pdata->jack,	NULL, 0);
