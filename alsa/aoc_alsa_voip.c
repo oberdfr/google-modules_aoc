@@ -474,7 +474,7 @@ static int aoc_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_r
 	if (rtd->dai_link->dpcm_playback) {
 		substream = rtd->pcm->streams[SNDRV_PCM_STREAM_PLAYBACK].substream;
 		snd_pcm_lib_preallocate_pages(substream, SNDRV_DMA_TYPE_CONTINUOUS,
-					      snd_dma_continuous_data(GFP_KERNEL),
+					      component->dev,
 					      snd_aoc_playback_hw.buffer_bytes_max,
 					      snd_aoc_playback_hw.buffer_bytes_max);
 	}
@@ -482,7 +482,7 @@ static int aoc_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_r
 	if (rtd->dai_link->dpcm_capture) {
 		substream = rtd->pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream;
 		snd_pcm_lib_preallocate_pages(substream, SNDRV_DMA_TYPE_CONTINUOUS,
-					      snd_dma_continuous_data(GFP_KERNEL),
+					      component->dev,
 					      snd_aoc_playback_hw.buffer_bytes_max,
 					      snd_aoc_playback_hw.buffer_bytes_max);
 	}
