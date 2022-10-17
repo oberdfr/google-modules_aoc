@@ -21,10 +21,10 @@ kernel_module(
         "aoc_usb_driver.ko",
     ],
     kernel_build = "//private/google-modules/soc/gs:cloudripper",
-    kernel_module_deps = [
-        "//private/google-modules/aoc:aoc.cloudripper",
-    ],
     visibility = [
         "//private/google-modules/soc/gs:__pkg__",
+    ],
+    deps = [
+        "//private/google-modules/aoc:aoc.cloudripper",
     ],
 )
