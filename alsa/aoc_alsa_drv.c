@@ -62,6 +62,7 @@ static const char *const audio_service_names[] = {
 	"audio_android_aec",
 	"audio_ultrasonic",
 	"audio_immersive",
+	"audio_capture_inject",
 	NULL,
 };
 
@@ -74,9 +75,39 @@ static bool drv_registered;
 static bool aoc_audio_online;
 static wait_queue_head_t aoc_audio_state_wait_head;
 
+static bool pcm_support_interrupt(uint8_t mbox_index)
+{
+	return (mbox_index == PCM_CHANNEL) ? true : false;
+}
+
+static bool incall_hifi_support_interrupt(uint8_t mbox_index)
+{
+	return (mbox_index == INCALL_CHANNEL || mbox_index == HIFI_CHANNEL) ? true : false;
+}
+
+static bool voip_support_interrupt(uint8_t mbox_index)
+{
+	return (mbox_index == VOIP_CHANNEL) ? true : false;
+}
+
 static void compressed_offload_isr(struct aoc_service_dev *dev)
 {
 	aoc_compr_offload_isr(dev);
+}
+
+static void pcm_isr(struct aoc_service_dev *dev)
+{
+	aoc_pcm_isr(dev);
+}
+
+static void voip_isr(struct aoc_service_dev *dev)
+{
+	aoc_voip_isr(dev);
+}
+
+static void incall_hifi_isr(struct aoc_service_dev *dev)
+{
+	aoc_incall_hifi_isr(dev);
 }
 
 int8_t aoc_audio_service_num(void)
@@ -160,6 +191,9 @@ int free_aoc_audio_service(const char *name, struct aoc_service_dev *dev)
 		       service_lists[i].ref);
 		goto done;
 	}
+
+	if (service_lists[i].dev)
+		service_lists[i].dev->prvdata = NULL;
 
 	service_lists[i].ref--;
 	service_lists[i].event_callback = NULL;
@@ -339,7 +373,16 @@ static int aoc_alsa_probe(struct aoc_service_dev *dev)
 
 	if (strcmp(dev_name(&dev->dev), AOC_COMPR_OFFLOAD_SERVICE) == 0)
 		dev->handler = compressed_offload_isr;
-
+	else if (pcm_support_interrupt(dev->mbox_index)) {
+		dev->handler = pcm_isr;
+		pr_notice("%s supports interrupt-driven\n", dev_name(&dev->dev));
+	} else if (incall_hifi_support_interrupt(dev->mbox_index)) {
+		dev->handler = incall_hifi_isr;
+		pr_notice("%s supports interrupt-driven\n", dev_name(&dev->dev));
+	} else if (voip_support_interrupt(dev->mbox_index)) {
+		dev->handler = voip_isr;
+		pr_notice("%s supports interrupt-driven\n", dev_name(&dev->dev));
+	}
 	return 0;
 }
 

@@ -38,20 +38,15 @@ static struct snd_pcm_hardware snd_aoc_playback_hw = {
 	.periods_max = 128,
 };
 
-static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
+static bool aoc_incall_hifi_support_interrupt(uint8_t mbox_index)
 {
-	struct aoc_alsa_stream *alsa_stream;
+	return (mbox_index == INCALL_CHANNEL || mbox_index == HIFI_CHANNEL);
+}
+
+static enum hrtimer_restart aoc_incall_hifi_irq_process(struct aoc_alsa_stream *alsa_stream)
+{
 	struct aoc_service_dev *dev;
 	unsigned long consumed; /* TODO: uint64_t? */
-
-	WARN_ON(!timer);
-	alsa_stream = container_of(timer, struct aoc_alsa_stream, hr_timer);
-
-	WARN_ON(!alsa_stream || !alsa_stream->substream);
-
-	/* Start the timer immediately for next period */
-	/* aoc_timer_start(alsa_stream); */
-	aoc_timer_restart(alsa_stream);
 
 	/* The number of bytes read/writtien should be the bytes in the buffer
 	 * already played out in the case of playback. But this may not be true
@@ -93,6 +88,43 @@ static enum hrtimer_restart aoc_pcm_hrtimer_irq_handler(struct hrtimer *timer)
 	return HRTIMER_RESTART;
 }
 
+static enum hrtimer_restart aoc_incall_hifi_hrtimer_irq_handler(struct hrtimer *timer)
+{
+	struct aoc_alsa_stream *alsa_stream;
+	WARN_ON(!timer);
+	alsa_stream = container_of(timer, struct aoc_alsa_stream, hr_timer);
+
+	WARN_ON(!alsa_stream || !alsa_stream->substream);
+
+	/* Start the timer immediately for next period */
+	/* aoc_timer_start(alsa_stream); */
+	aoc_timer_restart(alsa_stream);
+
+	return aoc_incall_hifi_irq_process(alsa_stream);
+}
+
+void aoc_incall_hifi_isr(struct aoc_service_dev *dev)
+{
+	struct aoc_alsa_stream *alsa_stream;
+
+	if (!dev) {
+		pr_err("ERR: NULL deepbuffer aoc service pointer\n");
+		return;
+	}
+
+	alsa_stream = dev->prvdata;
+
+	if (alsa_stream == NULL)
+		return;
+
+	if (alsa_stream->substream == NULL) {
+		pr_err("ERR: NULL alsa_stream->substream pointer\n");
+		return;
+	}
+
+	aoc_incall_hifi_irq_process(alsa_stream);
+}
+
 static void snd_aoc_pcm_free(struct snd_pcm_runtime *runtime)
 {
 	pr_debug("Freeing up alsa stream here ..\n");
@@ -115,14 +147,14 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	int idx;
 	int err;
 
-	dev_dbg(component->dev, "stream (%d)\n", substream->number); /* Playback or capture */
+	dev_notice(component->dev, "stream (%d)\n", substream->number); /* Playback or capture */
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
 		dev_err(component->dev, "ERR: interrupted whilst waiting for lock\n");
 		return -EINTR;
 	}
 
 	idx = substream->pcm->device;
-	dev_dbg(component->dev, "pcm device open (%d)\n", idx);
+	dev_notice(component->dev, "pcm device open (%d)\n", idx);
 	dev_dbg(component->dev, "chip open (%d)\n", chip->opened);
 
 	/* Find the corresponding aoc audio service */
@@ -170,9 +202,15 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	alsa_stream->open = 1;
 	alsa_stream->draining = 1;
 
-	alsa_stream->timer_interval_ns = PCM_TIMER_INTERVAL_NANOSECS;
-	hrtimer_init(&(alsa_stream->hr_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	alsa_stream->hr_timer.function = &aoc_pcm_hrtimer_irq_handler;
+	if (aoc_incall_hifi_support_interrupt(alsa_stream->dev->mbox_index)) {
+		dev->prvdata = alsa_stream;
+		alsa_stream->isr_type = INTR;
+	} else {
+		alsa_stream->timer_interval_ns = PCM_TIMER_INTERVAL_NANOSECS;
+		hrtimer_init(&(alsa_stream->hr_timer), CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		alsa_stream->hr_timer.function = &aoc_incall_hifi_hrtimer_irq_handler;
+		alsa_stream->isr_type = TIMER;
+	}
 
 	/* TODO: refactor needed on mapping between device number and entrypoint */
 	alsa_stream->entry_point_idx = (idx == 7) ? HAPTICS : idx;

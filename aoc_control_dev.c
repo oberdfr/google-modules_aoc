@@ -20,6 +20,10 @@
 
 #define AOC_CONTROL_NAME "aoc_stats"
 #define AOC_SERVICE_NAME "control"
+#define STAT_READ_TIMEOUT 1000
+
+static int aoc_control_prepare(struct device *dev);
+static void aoc_control_complete(struct device *dev);
 
 struct aoc_stat {
 	char name[8];
@@ -35,6 +39,11 @@ struct stats_prvdata {
 	int total_stats;
 	long service_timeout;
 	u8 memory_vote_core_id;
+};
+
+const static struct dev_pm_ops aoc_control_pm_ops = {
+	.prepare = aoc_control_prepare,
+	.complete = aoc_control_complete,
 };
 
 /* Driver methods */
@@ -429,6 +438,43 @@ static ssize_t read_stat_by_name(struct device *dev, char *buf,
 	return 0;
 }
 
+static int aoc_control_prepare(struct device *dev)
+{
+	#if IS_ENABLED(CONFIG_SOC_GS201)
+		struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+		struct CMD_AP_STATE_TRANSITION cmd;
+		int ret;
+
+		AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
+		cmd.transition = 0;
+
+		ret = write_attribute(prvdata, &cmd, sizeof(cmd));
+		if (ret < 0)
+			dev_err(dev, "notifying AoC of entering deep sleep ret = %d\n", ret);
+
+		return ret;
+	#else
+		return 0;
+	#endif
+}
+
+static void aoc_control_complete(struct device *dev)
+{
+	#if IS_ENABLED(CONFIG_SOC_GS201)
+		struct stats_prvdata *prvdata = dev_get_drvdata(dev);
+		struct CMD_AP_STATE_TRANSITION cmd;
+		int ret;
+
+		AocCmdNoAckHdrSet(&cmd.parent, CMD_AP_STATE_TRANSITION_ID, sizeof(cmd));
+		cmd.transition = 1;
+
+		ret = write_attribute(prvdata, &cmd, sizeof(cmd));
+
+		if (ret < 0)
+			dev_err(dev, "notifying AoC of exiting deep sleep ret = %d\n", ret);
+	#endif
+}
+
 #define DECLARE_STAT(stat_name, sysfs_name)                                    \
 	static ssize_t sysfs_name##_show(                                      \
 		struct device *dev, struct device_attribute *attr, char *buf)  \
@@ -572,7 +618,7 @@ static void discovery_workitem(struct work_struct *work)
 			     sizeof(cmd_total));
 
 	if (ret < sizeof(cmd_total)) {
-		dev_err(dev, "failed to read the number of statistics\n");
+		dev_err(dev, "failed to read the number of statistics: %d\n", ret);
 		goto out;
 	}
 
@@ -629,7 +675,7 @@ static int aoc_control_probe(struct aoc_service_dev *sd)
 
 	prvdata = devm_kzalloc(dev, sizeof(*prvdata), GFP_KERNEL);
 	prvdata->service = sd;
-	prvdata->service_timeout = msecs_to_jiffies(100);
+	prvdata->service_timeout = msecs_to_jiffies(STAT_READ_TIMEOUT);
 	mutex_init(&prvdata->lock);
 	prvdata->memory_vote_core_id = 1;
 
@@ -660,6 +706,7 @@ static int aoc_control_remove(struct aoc_service_dev *sd)
 static struct aoc_driver aoc_control_driver = {
 	.drv = {
 			.name = AOC_CONTROL_NAME,
+			.pm = &aoc_control_pm_ops,
 		},
 	.service_names = service_names,
 	.probe = aoc_control_probe,

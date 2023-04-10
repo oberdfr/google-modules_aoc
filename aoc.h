@@ -63,6 +63,8 @@ wait_queue_head_t *aoc_service_get_write_queue(struct aoc_service_dev *dev);
  */
 bool aoc_service_flush_read_data(struct aoc_service_dev *dev);
 
+bool aoc_online_state(struct aoc_service_dev *dev);
+
 struct aoc_driver {
 	struct device_driver drv;
 
@@ -96,9 +98,11 @@ void aoc_trigger_watchdog(const char *reason);
 
 #define AOC_DOWNCALL_DOORBELL 12
 
-#define AOC_GPIO_BASE 0xB70000
+#define AOC_GPIO_BASE_WC  0xB70000
+#define AOC_GPIO_BASE_PRO 0xD70000
 
-#define AOC_PCU_BASE 0xB00000
+#define AOC_PCU_BASE_WC  0xB00000
+#define AOC_PCU_BASE_PRO 0xA00000
 #define AOC_PCU_DB_SET_OFFSET 0xD004
 #define AOC_PCU_DB_CLR_OFFSET 0xD008
 #define AOC_PCU_REVISION_OFFSET 0xF000
@@ -132,6 +136,7 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCPlaybackHeapSize = 0x100D,
 	kAOCCaptureHeapAddress = 0x100E,
 	kAOCCaptureHeapSize = 0x100F,
+	kAOCForceSpeakerUltrasonic = 0x1010,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \
