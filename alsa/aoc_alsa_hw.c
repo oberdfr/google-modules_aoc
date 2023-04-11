@@ -13,15 +13,15 @@
 #include "aoc_alsa_drv.h"
 #include "aoc_alsa_path.h"
 
-#ifdef MODEM_NOTIFIER
-#include <linux/modem_notifier.h>
-#endif
+#include "modem_notifier.h"
 
 #ifndef ALSA_AOC_CMD_LOG_DISABLE
 static int cmd_count;
 #endif
 
 #define DEFAULT_TELEPHONY_MIC PORT_INCALL_TX
+
+#define AOC_CHIRP_BLOCK 9
 
 extern struct be_path_cache port_array[PORT_MAX];
 
@@ -271,11 +271,16 @@ static int aoc_audio_control(const char *cmd_channel, const uint8_t *cmd,
 #endif /* AOC_CMD_DEBUG_ENABLE */
 
 	if (err < 1) {
+		uint16_t cmd_id = ((struct CMD_HDR *)cmd)->id;
+		char reset_reason[40];
+
+		scnprintf(reset_reason, sizeof(reset_reason), "ALSA command timeout %#06x",
+			cmd_id);
 		pr_err(ALSA_AOC_CMD " ERR:timeout - cmd [%s] id %#06x\n",
-		       CMD_CHANNEL(dev), ((struct CMD_HDR *)cmd)->id);
+		       CMD_CHANNEL(dev), cmd_id);
 		print_hex_dump(KERN_ERR, ALSA_AOC_CMD " :mem ",
 			       DUMP_PREFIX_OFFSET, 16, 1, cmd, cmd_size, false);
-		aoc_trigger_watchdog(ALSA_CTL_TIMEOUT);
+		aoc_trigger_watchdog(reset_reason);
 	} else if (err == 4) {
 		pr_err(ALSA_AOC_CMD " ERR:%#x - cmd [%s] id %#06x\n",
 		       *(uint32_t *)buffer, CMD_CHANNEL(dev),
@@ -2713,6 +2718,10 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 		}
 	}
 
+	/* If AoC is not ready, force read data to zero */
+	if (!aoc_online_state(dev))
+		memset(tmp, 0, count);
+
 	err = copy_to_user(dest, tmp, count);
 	if (err != 0) {
 		pr_err("ERR: %d bytes not copied to user space\n", err);
@@ -3349,9 +3358,8 @@ int prepare_phonecall(struct aoc_alsa_stream *alsa_stream)
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem start fail\n", err);
 
-#ifdef MODEM_NOTIFIER
 	modem_voice_call_notify_event(MODEM_VOICE_CALL_ON, NULL);
-#endif
+
 	return err;
 }
 
@@ -3372,9 +3380,8 @@ int teardown_phonecall(struct aoc_alsa_stream *alsa_stream)
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem stop fail\n", err);
 
-#ifdef MODEM_NOTIFIER
 	modem_voice_call_notify_event(MODEM_VOICE_CALL_OFF, NULL);
-#endif
+
 	return err;
 }
 
@@ -3489,7 +3496,7 @@ int aoc_compr_offload_send_metadata(struct aoc_alsa_stream *alsa_stream)
 	cmd.curr_track_padding_frames = alsa_stream->compr_padding;
 	cmd.curr_track_delay_frames = alsa_stream->compr_delay;
 
-	pr_info("send metadata, padding %d , delay %d\n", cmd.curr_track_padding_frames,
+	pr_info("send metadata, padding %d, delay %d\n", cmd.curr_track_padding_frames,
 		cmd.curr_track_delay_frames);
 
 	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), NULL,
@@ -3700,4 +3707,89 @@ int aoc_audio_us_record(struct aoc_chip *chip, bool enable)
 		pr_err("ERR:%d in ultra sonic record %s control\n", err, enable ? "start" : "stop");
 
 	return err;
+}
+
+int aoc_audio_set_chirp_parameter(struct aoc_chip *chip, int key, int value)
+{
+	int err;
+	struct CMD_AUDIO_OUTPUT_SET_PARAMETER cmd;
+
+	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_OUTPUT_SET_PARAMETER_ID,
+		     sizeof(cmd));
+	cmd.block = AOC_CHIRP_BLOCK;
+	cmd.key = key;
+	cmd.val = value;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
+	if (err < 0)
+		pr_err("ERR:%d in AoC Set Chirp Parameter, key: %d\n", err, key);
+
+	return err < 0 ? err : 0;
+}
+
+int aoc_audio_set_chre_src_pdm_gain(struct aoc_chip *chip, int gain)
+{
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+	int err;
+	struct CMD_AUDIO_INPUT_SET_CHRE_SRC_PDM_GAIN cmd;
+
+	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_PDM_GAIN_ID,
+		     sizeof(cmd));
+	cmd.gain_centibel = gain;
+
+	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
+	if (err < 0)
+		pr_err("ERR:%d in AoC Set CHRE PDM gain\n", err);
+
+	return err < 0 ? err : 0;
+#else
+	pr_err("WARN: setting CHRE PDM gain is not supported\n");
+	return 0;
+#endif
+}
+
+int aoc_audio_set_chre_src_aec_gain(struct aoc_chip *chip, int gain)
+{
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+	int err;
+	struct CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_GAIN cmd;
+
+	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_GAIN_ID,
+		     sizeof(cmd));
+	cmd.gain_centibel = gain;
+
+	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
+	if (err < 0)
+		pr_err("ERR:%d in AoC Set CHRE AEC gain\n", err);
+
+	return err < 0 ? err : 0;
+#else
+	pr_err("WARN: setting CHRE AEC gain is not supported\n");
+	return 0;
+#endif
+}
+
+int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout)
+{
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+	int err;
+	struct CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_TIMEOUT cmd;
+
+	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_CHRE_SRC_AEC_TIMEOUT_ID,
+		     sizeof(cmd));
+	cmd.timeout_ms = timeout;
+
+	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
+				sizeof(cmd), (uint8_t *)&cmd, chip);
+	if (err < 0)
+		pr_err("ERR:%d in AoC Set CHRE timeout\n", err);
+
+	return err < 0 ? err : 0;
+#else
+	pr_err("WARN: setting CHRE AEC gain is not supported\n");
+	return 0;
+#endif
 }
