@@ -9,7 +9,9 @@ filegroup(
         "uapi/*.h",
     ]),
     visibility = [
+        # keep sorted
         ":__subpackages__",
+        "//private/devices/google:__subpackages__",
         "//private/google-modules/touch/common:__pkg__",
     ],
 )
@@ -36,6 +38,7 @@ kernel_module(
     kernel_build = "//private/google-modules/soc/gs:gs_kernel_build",
     visibility = [
         ":__subpackages__",
+        "//private/devices/google:__subpackages__",
         "//private/google-modules/soc/gs:__pkg__",
         "//private/google-modules/touch/common:__pkg__",
     ],
