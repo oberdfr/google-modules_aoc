@@ -16,6 +16,7 @@
 #include <linux/list.h>
 #include <linux/interrupt.h>
 #include <linux/wait.h>
+#include <linux/usb.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -30,6 +31,8 @@
 
 #include "../aoc-interface.h"
 #include "google-aoc-enum.h"
+#include "usbaudio.h"
+#include "audiometrics.h"
 
 #define ALSA_AOC_CMD "alsa-aoc"
 #define CMD_INPUT_CHANNEL "audio_input_control"
@@ -109,10 +112,9 @@ enum uc_device_id {
 #define alsa2chip(vol) (vol) /* Convert alsa to chip volume */
 #define chip2alsa(vol) (vol) /* Convert chip to alsa volume */
 
-#define NULL_PATH -1
+#define MAX_NUM_OF_MAILBOX_INDEX 15
 
-/* Define trigger aoc watchdog reason */
-#define ALSA_CTL_TIMEOUT "alsa_ctl_timeout"
+#define NULL_PATH -1
 
 /* TODO: Copied from AoC repo and will be removed */
 enum bluetooth_mode {
@@ -154,7 +156,11 @@ enum {
 	USB_RX_SR,
 	USB_RX_CH,
 	USB_RX_BW,
-	USB_CFG_TO_AOC
+	USB_CFG_TO_AOC,
+	USB_CARD,
+	USB_DEVICE,
+	USB_DIRECTION,
+	USB_MEM_CFG
 };
 
 /* AoC sidetone EQ */
@@ -204,6 +210,11 @@ enum { NONBLOCKING = 0, BLOCKING = 1 };
 enum { STOP = 0, START };
 enum { PLAYBACK_MODE, VOICE_TX_MODE, VOICE_RX_MODE, HAPTICS_MODE, OFFLOAD_MODE };
 
+enum { TIMER = 0, INTR };
+enum { INCALL_CHANNEL = 5, PCM_CHANNEL = 20, HIFI_CHANNEL, VOIP_CHANNEL};
+
+enum { CHRE_GAIN_PATH_PDM = 0, CHRE_GAIN_PATH_AEC, CHRE_GAIN_PATH_TOT };
+
 struct aoc_chip {
 	struct snd_card *card;
 	struct snd_soc_jack jack; /* TODO: temporary use, need refactor  */
@@ -252,6 +263,11 @@ struct aoc_chip {
 	int sidetone_enable;
 	int mic_loopback_enabled;
 	int gapless_offload_enable;
+	int chirp_enable;
+	int chirp_interval;
+	int chirp_mode;
+	int chre_src_gain[CHRE_GAIN_PATH_TOT];
+	int chre_src_aec_timeout;
 	unsigned int opened;
 	unsigned int capture_param_set;
 	struct mutex audio_mutex;
@@ -259,6 +275,9 @@ struct aoc_chip {
 	spinlock_t audio_lock;
 	long pcm_wait_time_in_ms;
 	long voice_pcm_wait_time_in_ms;
+	int usb_card;
+	int usb_device;
+	int usb_direction;
 
 	struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG a2dp_encoder_cfg;
 	struct CMD_AUDIO_OUTPUT_USB_CONFIG usb_sink_cfg;
@@ -287,6 +306,7 @@ struct aoc_alsa_stream {
 	int idx; /* PCM device number */
 	int entry_point_idx; /* Index of entry point, same as idx in playback */
 	int stream_type; /* Normal pcm, incall, mmap, hifi, compr */
+	int isr_type; /* timer, interrupt */
 
 	int channels; /* Number of channels in audio */
 	int params_rate; /* Sampling rate */
@@ -303,11 +323,13 @@ struct aoc_alsa_stream {
 	int open;
 	int running;
 	int draining;
+	int wq_busy_count;
 
 	struct work_struct free_aoc_service_work;
 	struct work_struct pcm_period_work;
 };
 
+bool aoc_support_interrupt_idx(int idx);
 void aoc_timer_start(struct aoc_alsa_stream *alsa_stream);
 void aoc_timer_restart(struct aoc_alsa_stream *alsa_stream);
 void aoc_timer_stop(struct aoc_alsa_stream *alsa_stream);
@@ -316,6 +338,8 @@ void aoc_pcm_period_work_handler(struct work_struct *work);
 
 int snd_aoc_new_ctl(struct aoc_chip *chip);
 int snd_aoc_new_pcm(struct aoc_chip *chip);
+
+int snd_aoc_pdm_state(void* priv, int index);
 
 int aoc_audio_setup(struct aoc_alsa_stream *alsa_stream);
 int aoc_audio_open(struct aoc_alsa_stream *alsa_stream);
@@ -413,6 +437,8 @@ int aoc_set_sink_mode(struct aoc_chip *chip, int sink, int mode);
 int aoc_set_usb_config(struct aoc_chip *chip);
 int aoc_set_usb_config_v2(struct aoc_chip *chip);
 
+int aoc_set_usb_mem_config(struct aoc_chip *achip);
+
 int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 		    uint32_t count);
 int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
@@ -420,12 +446,21 @@ int aoc_audio_read(struct aoc_alsa_stream *alsa_stream, void *dest,
 int aoc_audio_volume_set(struct aoc_chip *chip, uint32_t volume,
 			 int src, int dst);
 
+int aoc_audio_set_chirp_parameter(struct aoc_chip *chip, int key, int value);
+
+int aoc_audio_set_chre_src_pdm_gain(struct aoc_chip *chip, int gain);
+int aoc_audio_set_chre_src_aec_gain(struct aoc_chip *chip, int gain);
+int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout);
+
 int prepare_phonecall(struct aoc_alsa_stream *alsa_stream);
 int teardown_phonecall(struct aoc_alsa_stream *alsa_stream);
 
 int prepare_voipcall(struct aoc_alsa_stream *alsa_stream);
 int teardown_voipcall(struct aoc_alsa_stream *alsa_stream);
 
+void aoc_pcm_isr(struct aoc_service_dev *dev);
+void aoc_incall_hifi_isr(struct aoc_service_dev *dev);
+void aoc_voip_isr(struct aoc_service_dev *dev);
 void aoc_compr_offload_isr(struct aoc_service_dev *dev);
 int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type);
 int aoc_compr_offload_send_metadata(struct aoc_alsa_stream *alsa_stream);
@@ -454,6 +489,17 @@ int aoc_incall_init(void);
 void aoc_incall_exit(void);
 int aoc_voip_init(void);
 void aoc_voip_exit(void);
+int aoc_usb_init(void);
+void aoc_usb_exit(void);
 
 int aoc_audio_us_record(struct aoc_chip *chip, bool enable);
+
+bool aoc_alsa_usb_callback_register(
+	void (*callback)(struct usb_device *, struct usb_host_endpoint *));
+void aoc_alsa_usb_callback_unregister(void);
+
+void usb_audio_offload_connect(struct snd_usb_audio *chip);
+void usb_audio_offload_disconnect(struct snd_usb_audio *chip);
+void usb_audio_offload_suspend(struct usb_interface *intf, pm_message_t message);
+
 #endif
