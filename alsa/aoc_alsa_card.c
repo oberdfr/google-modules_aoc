@@ -1836,6 +1836,8 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	chip->compr_offload_volume = 15;
 	chip->voice_call_audio_enable = 1;
 	chip->mic_spatial_module_enable = 0;
+	chip->capture_eraser_enable = 0;
+	chip->hotword_tap_enable = 0;
 	chip->sidetone_enable = 0;
 	chip->voip_rx_prepared = 0;
 	chip->voip_tx_prepared = 0;
@@ -1850,6 +1852,11 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	/* Default values for playback volume and mute */
 	chip->volume = 1000;
 	chip->mute = 1;
+
+	/* Default values for incall mic gain and mute */
+	chip->incall_mic_muted = false;
+	chip->incall_mic_gain_current = 0;
+	chip->incall_mic_gain_target = 0;
 
 	mutex_init(&chip->audio_mutex);
 	mutex_init(&chip->audio_cmd_chan_mutex);

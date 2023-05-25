@@ -171,6 +171,9 @@ struct aoc_prvdata {
 	struct mbox_slot mbox_channels[AOC_MBOX_CHANNELS];
 	struct aoc_service_dev **services;
 
+	unsigned long *read_blocked_mask;
+	unsigned long *write_blocked_mask;
+
 	struct work_struct online_work;
 	struct resource dram_resource;
 	aoc_map_handler map_handler;
@@ -247,6 +250,8 @@ struct aoc_prvdata {
 	int reset_wait_time_index;
 };
 
+struct aoc_prvdata *aoc_prvdata_copy;
+
 /* TODO: Reduce the global variables (move into a driver structure) */
 /* Resources found from the device tree */
 static struct resource *aoc_sram_resource;
@@ -288,6 +293,10 @@ static bool aoc_disable_restart = false;
 module_param(aoc_disable_restart, bool, 0644);
 MODULE_PARM_DESC(aoc_disable_restart, "Prevent AoC from restarting after crashing.");
 
+static bool aoc_debug = false;
+module_param(aoc_debug, bool, 0644);
+MODULE_PARM_DESC(aoc_debug, "Enable debug mode for AoC.");
+
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
 
@@ -300,6 +309,9 @@ static int aoc_bus_match(struct device *dev, struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
 static void aoc_bus_remove(struct device *dev);
 
+static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw);
+static void aoc_configure_sysmmu_manual(struct aoc_prvdata *p);
+
 static struct bus_type aoc_bus_type = {
 	.name = "aoc",
 	.match = aoc_bus_match,
@@ -311,9 +323,6 @@ struct aoc_client {
 	int client_id;
 	int endpoint;
 };
-
-static unsigned long read_blocked_mask;
-static unsigned long write_blocked_mask;
 
 static bool write_reset_trampoline(u32 addr);
 static bool aoc_a32_release_from_reset(void);
@@ -790,7 +799,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
 	phys_addr_t capture_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_capture_heap_base);
 	unsigned int i;
-	bool fw_signed;
+	bool fw_signed, gsa_enabled;
 
 	struct aoc_fw_data fw_data[] = {
 		{ .key = kAOCBoardID, .value = board_id },
@@ -900,13 +909,22 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		}
 	}
 
+	gsa_enabled = of_property_read_bool(prvdata->dev->of_node, "gsa-enabled");
+
 	if (fw_signed) {
-		int rc = aoc_fw_authenticate(prvdata, fw);
-		if (rc) {
-			dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
-			goto free_fw;
+		if (gsa_enabled) {
+			int rc = aoc_fw_authenticate(prvdata, fw);
+
+			if (rc) {
+				dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
+				goto free_fw;
+			}
+		} else {
+			aoc_configure_sysmmu(prvdata, fw);
+			write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
 		}
 	} else {
+		aoc_configure_sysmmu_manual(prvdata);
 		write_reset_trampoline(AOC_BINARY_LOAD_ADDRESS + bootloader_offset);
 	}
 
@@ -920,7 +938,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	prvdata->ipc_base = aoc_dram_translate(prvdata, ipc_offset);
 
 	/* start AOC */
-	if (fw_signed) {
+	if (fw_signed && gsa_enabled) {
 		int rc = gsa_send_aoc_cmd(prvdata->gsa_dev, GSA_AOC_START);
 		if (rc < 0) {
 			dev_err(dev, "GSA: Failed to start AOC: %d\n", rc);
@@ -1081,11 +1099,11 @@ ssize_t aoc_service_read(struct aoc_service_dev *dev, uint8_t *buffer,
 			goto err;
 		}
 
-		set_bit(service_number, &read_blocked_mask);
+		set_bit(service_number, prvdata->read_blocked_mask);
 		ret = wait_event_interruptible(dev->read_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_read_message(service, AOC_UP));
-		clear_bit(service_number, &read_blocked_mask);
+		clear_bit(service_number, prvdata->read_blocked_mask);
 	}
 
 	if (dev->dead) {
@@ -1192,13 +1210,13 @@ ssize_t aoc_service_read_timeout(struct aoc_service_dev *dev, uint8_t *buffer,
 	}
 
 	if (!aoc_service_can_read_message(service, AOC_UP)) {
-		set_bit(service_number, &read_blocked_mask);
+		set_bit(service_number, prvdata->read_blocked_mask);
 		ret = wait_event_interruptible_timeout(
 			dev->read_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_read_message(service, AOC_UP),
 			timeout);
-		clear_bit(service_number, &read_blocked_mask);
+		clear_bit(service_number, prvdata->read_blocked_mask);
 	}
 
 	if (dev->dead || (aoc_state != AOC_STATE_ONLINE)) {
@@ -1293,11 +1311,11 @@ ssize_t aoc_service_write(struct aoc_service_dev *dev, const uint8_t *buffer,
 			goto err;
 		}
 
-		set_bit(service_number, &write_blocked_mask);
+		set_bit(service_number, prvdata->write_blocked_mask);
 		ret = wait_event_interruptible(dev->write_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_write_message(service, AOC_DOWN));
-		clear_bit(service_number, &write_blocked_mask);
+		clear_bit(service_number, prvdata->write_blocked_mask);
 	}
 
 	if (dev->dead) {
@@ -1379,13 +1397,13 @@ ssize_t aoc_service_write_timeout(struct aoc_service_dev *dev, const uint8_t *bu
 	}
 
 	if (!aoc_service_can_write_message(service, AOC_DOWN)) {
-		set_bit(service_number, &write_blocked_mask);
+		set_bit(service_number, prvdata->write_blocked_mask);
 		ret = wait_event_interruptible_timeout(
 			dev->write_queue,
 			aoc_state != AOC_STATE_ONLINE || dev->dead ||
 				aoc_service_can_write_message(service, AOC_DOWN),
 			timeout);
-		clear_bit(service_number, &write_blocked_mask);
+		clear_bit(service_number, prvdata->write_blocked_mask);
 	}
 
 	if (dev->dead || (aoc_state != AOC_STATE_ONLINE)) {
@@ -1454,18 +1472,22 @@ EXPORT_SYMBOL_GPL(aoc_service_can_write);
 void aoc_service_set_read_blocked(struct aoc_service_dev *dev)
 {
 	int service_number;
+	struct device *parent = dev->dev.parent;
+	struct aoc_prvdata *prvdata = dev_get_drvdata(parent);
 
 	service_number = dev->service_index;
-	set_bit(service_number, &read_blocked_mask);
+	set_bit(service_number, prvdata->read_blocked_mask);
 }
 EXPORT_SYMBOL_GPL(aoc_service_set_read_blocked);
 
 void aoc_service_set_write_blocked(struct aoc_service_dev *dev)
 {
 	int service_number;
+	struct device *parent = dev->dev.parent;
+	struct aoc_prvdata *prvdata = dev_get_drvdata(parent);
 
 	service_number = dev->service_index;
-	set_bit(service_number, &write_blocked_mask);
+	set_bit(service_number, prvdata->write_blocked_mask);
 }
 EXPORT_SYMBOL_GPL(aoc_service_set_write_blocked);
 
@@ -1610,6 +1632,8 @@ static int aoc_watchdog_restart(struct aoc_prvdata *prvdata)
 	rc = aoc_req_wait(prvdata, true);
 	if (rc) {
 		dev_err(prvdata->dev, "timed out waiting for aoc_ack\n");
+		if (aoc_debug)
+			panic("AoC kernel panic: timed out waiting for aoc_ack");
 		return rc;
 	}
 
@@ -1704,6 +1728,7 @@ static void acpm_aoc_reset_callback(unsigned int *cmd, unsigned int size)
 		return;
 
 	prvdata = platform_get_drvdata(aoc_platform_device);
+	pr_info("AOC prvdata pointer is: %p (expected: %p)", prvdata, aoc_prvdata_copy);
 	prvdata->aoc_reset_done = true;
 	wake_up(&prvdata->aoc_reset_wait_queue);
 }
@@ -1815,6 +1840,10 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 	int ret = 0;
 	int i;
 
+	atomic_inc(&prvdata->aoc_process_active);
+	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+		goto exit;
+
 	ret += scnprintf(buf, PAGE_SIZE, "Services : %d\n", services);
 	for (i = 0; i < services && ret < (PAGE_SIZE - 1); i++) {
 		aoc_service *s = service_at_index(prvdata, i);
@@ -1839,6 +1868,8 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 				hdr->regions[1].tx, hdr->regions[1].rx);
 		}
 	}
+exit:
+	atomic_dec(&prvdata->aoc_process_active);
 
 	return ret;
 }
@@ -2235,11 +2266,45 @@ static inline void aoc_configure_ssmt( struct platform_device *pdev
 	__attribute__((unused))) { }
 #endif
 
-static void aoc_configure_sysmmu(struct aoc_prvdata *p)
+static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw)
 {
+	int rc;
+	size_t i, cnt;
+	struct sysmmu_entry *sysmmu;
 	struct iommu_domain *domain = p->domain;
 	struct device *dev = p->dev;
+	u16 sysmmu_offset, sysmmu_size;
+
+	rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
+	if (rc)
+		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
+
+	dev_info(dev, "Setting up SysMMU\n");
+	sysmmu_offset = _aoc_fw_sysmmu_offset(fw);
+	sysmmu_size = _aoc_fw_sysmmu_size(fw);
+	if (!_aoc_fw_is_valid_sysmmu_size(fw)) {
+		dev_info(dev, "Invalid sysmmu table (%u @ %u)\n", sysmmu_size, sysmmu_offset);
+		return;
+	}
+	cnt = sysmmu_size / sizeof(struct sysmmu_entry);
+	sysmmu = _aoc_fw_sysmmu_entry(fw);
+	for (i = 0; i < cnt; i++, sysmmu++) {
+		rc = iommu_map(domain, SYSMMU_VADDR(sysmmu->value),
+						SYSMMU_PADDR(sysmmu->value),
+						SYSMMU_SIZE(sysmmu->value),
+						IOMMU_READ | IOMMU_WRITE);
+		if (rc < 0)
+			return;
+	}
+}
+
+static void aoc_configure_sysmmu_manual(struct aoc_prvdata *p)
+{
+// TODO(alexiacobucci): remove this once build scripts are updated to sign image
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 	int rc;
+	struct iommu_domain *domain = p->domain;
+	struct device *dev = p->dev;
 
 	rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
 	if (rc)
@@ -2250,64 +2315,6 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping carveout failed\n");
 
-#if IS_ENABLED(CONFIG_SOC_GS201)
-	/* Use a 1MB mapping instead of individual mailboxes for now */
-	/* TODO: Turn the mailbox address ranges into dtb entries */
-	if (iommu_map(domain, 0x9E000000, 0x18200000, SZ_2M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping mailboxes failed\n");
-
-	/* Map in GSA mailbox */
-	if (iommu_map(domain, 0x9E200000, 0x17C00000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping gsa mailbox failed\n");
-
-	/* Map in modem registers */
-	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping modem failed\n");
-
-	/* Map in BLK_TPU */
-	/* if (iommu_map(domain, 0x9E600000, 0x1CE00000, SZ_2M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping mailboxes failed\n"); */
-
-	/* Map in the xhci_dma carveout */
-	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping xhci_dma carveout failed\n");
-
-	/* Map in USB for low power audio */
-	if (iommu_map(domain, 0x9E500000, 0x11200000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping usb failed\n");
-#elif IS_ENABLED(CONFIG_SOC_GS101)
-	/* Map in the xhci_dma carveout */
-	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping xhci_dma carveout failed\n");
-
-	/* Use a 1MB mapping instead of individual mailboxes for now */
-	/* TODO: Turn the mailbox address ranges into dtb entries */
-	if (iommu_map(domain, 0x9E000000, 0x17600000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping mailboxes failed\n");
-
-	/* Map in GSA mailbox */
-	if (iommu_map(domain, 0x9E100000, 0x17C00000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping gsa mailbox failed\n");
-
-	/* Map in USB for low power audio */
-	if (iommu_map(domain, 0x9E200000, 0x11100000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping usb failed\n");
-
-	/* Map in modem registers */
-	if (iommu_map(domain, 0x9E300000, 0x40000000, SZ_1M,
-		      IOMMU_READ | IOMMU_WRITE))
-		dev_err(dev, "mapping modem failed\n");
-#elif IS_ENABLED(CONFIG_SOC_ZUMA)
 	/* Use a 1MB mapping instead of individual mailboxes for now */
 	/* TODO: Turn the mailbox address ranges into dtb entries */
 	if (iommu_map(domain, 0x9E000000, 0x15100000, SZ_2M,
@@ -2333,8 +2340,6 @@ static void aoc_configure_sysmmu(struct aoc_prvdata *p)
 	if (iommu_map(domain, 0x9B000000, 0x97000000, SZ_4M,
 		      IOMMU_READ | IOMMU_WRITE))
 		dev_err(dev, "mapping xhci_dma carveout failed\n");
-#else
-	#error "Unsupported silicon!"
 #endif
 }
 
@@ -2416,6 +2421,19 @@ static void aoc_did_become_online(struct work_struct *work)
 
 	prvdata->total_services = s;
 
+	if (prvdata->read_blocked_mask == NULL) {
+		prvdata->read_blocked_mask = devm_kcalloc(prvdata->dev, BITS_TO_LONGS(s),
+							  sizeof(unsigned long), GFP_KERNEL);
+		if (!prvdata->read_blocked_mask)
+			goto err;
+	}
+
+	if (prvdata->write_blocked_mask == NULL) {
+		prvdata->write_blocked_mask = devm_kcalloc(prvdata->dev, BITS_TO_LONGS(s),
+							  sizeof(unsigned long), GFP_KERNEL);
+		if (!prvdata->write_blocked_mask)
+			goto err;
+	}
 
 	for (i = 0; i < s; i++) {
 		create_service_device(prvdata, i);
@@ -2657,11 +2675,11 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 		if (service_dev->handler) {
 			service_dev->handler(service_dev);
 		} else {
-			if (test_bit(i, &read_blocked_mask) &&
+			if (test_bit(i, prvdata->read_blocked_mask) &&
 			    aoc_service_can_read_message(service, AOC_UP))
 				wake_up(&service_dev->read_queue);
 
-			if (test_bit(i, &write_blocked_mask) &&
+			if (test_bit(i, prvdata->write_blocked_mask) &&
 			    aoc_service_can_write_message(service, AOC_DOWN))
 				wake_up(&service_dev->write_queue);
 		}
@@ -2778,12 +2796,14 @@ static void aoc_watchdog(struct work_struct *work)
 	const int sscd_retry_ms = 1000;
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
-	char ap_reset_reason[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
 	u32 section_flags;
-	bool ap_reset = false;
+	bool ap_reset = false, invalid_magic;
 
 	prvdata->total_restarts++;
+
+	/* Initialize crash_info[0] to identify if it has changed later in the function. */
+	crash_info[0] = 0;
 
 	if (prvdata->ap_triggered_reset) {
 		if ((ktime_get_real_ns() - prvdata->last_reset_time_ns) / 1000000
@@ -2818,12 +2838,10 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 
 	if (prvdata->ap_triggered_reset) {
+		dev_info(prvdata->dev, "AP triggered reset, reason: [%s]",
+			prvdata->ap_reset_reason);
 		prvdata->ap_triggered_reset = false;
 		ap_reset = true;
-
-		snprintf(ap_reset_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1,
-			"AP Reset: %s", prvdata->ap_reset_reason);
-
 		trigger_aoc_ramdump(prvdata);
 	}
 
@@ -2838,20 +2856,21 @@ static void aoc_watchdog(struct work_struct *work)
 		const char *crash_reason = (const char *)ramdump_header +
 			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
 		bool crash_reason_valid = (strnlen(crash_reason,
-			RAMDUMP_SECTION_CRASH_INFO_SIZE) != 0);
+			sizeof(crash_info)) != 0);
 
 		dev_err(prvdata->dev, "aoc coredump timed out, coredump only contains DRAM\n");
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE,
+		snprintf(crash_info, sizeof(crash_info),
 			"AoC watchdog : %s (incomplete %u:%u)",
 			crash_reason_valid ? crash_reason : "unknown reason",
 			ramdump_header->breadcrumbs[0], ramdump_header->breadcrumbs[1]);
 	}
 
-	if (ramdump_header->valid && memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC))) {
+	invalid_magic = memcmp(ramdump_header, RAMDUMP_MAGIC, sizeof(RAMDUMP_MAGIC));
+	if (ramdump_header->valid && invalid_magic) {
 		dev_err(prvdata->dev,
 			"aoc coredump failed: invalid magic (corruption or incompatible firmware?)\n");
 		strscpy(crash_info, "AoC Watchdog : coredump corrupt",
-			RAMDUMP_SECTION_CRASH_INFO_SIZE);
+			sizeof(crash_info));
 	}
 
 #if !IS_ENABLED(CONFIG_SOC_ZUMA)
@@ -2874,22 +2893,31 @@ static void aoc_watchdog(struct work_struct *work)
 	}
 #endif
 
-	if (ramdump_header->valid) {
+	if (ramdump_header->valid && !invalid_magic) {
 		const char *crash_reason = (const char *)ramdump_header +
 			RAMDUMP_SECTION_CRASH_INFO_OFFSET;
 
 		section_flags = ramdump_header->sections[RAMDUMP_SECTION_CRASH_INFO_INDEX].flags;
-		if (section_flags & RAMDUMP_FLAG_VALID)
-			strscpy(crash_info, crash_reason, RAMDUMP_SECTION_CRASH_INFO_SIZE);
-		else
+		if (section_flags & RAMDUMP_FLAG_VALID) {
+			dev_info(prvdata->dev, "aoc coredump has valid coredump header, crash reason [%s]",
+				crash_reason);
+			strscpy(crash_info, crash_reason, sizeof(crash_info));
+		} else {
+			dev_info(prvdata->dev, "aoc coredump has valid coredump header, but invalid crash reason");
 			strscpy(crash_info, "AoC Watchdog : invalid crash info",
-				RAMDUMP_SECTION_CRASH_INFO_SIZE);
+				sizeof(crash_info));
+		}
 	}
 
 	if (ap_reset) {
 		/* Prefer the user specified reason */
-		snprintf(crash_info, RAMDUMP_SECTION_CRASH_INFO_SIZE - 1, "%s", ap_reset_reason);
+		scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s", prvdata->ap_reset_reason);
 	}
+
+	if (crash_info[0] == 0)
+		strscpy(crash_info, "AoC Watchdog: empty crash info string", sizeof(crash_info));
+
+	dev_info(prvdata->dev, "aoc crash info: [%s]", crash_info);
 
 	/* TODO(siqilin): Get paddr and vaddr base from firmware instead */
 	carveout_paddr_from_aoc = 0x98000000;
@@ -3375,6 +3403,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 		rc = -ENOMEM;
 		goto err_failed_prvdata_alloc;
 	}
+	aoc_prvdata_copy = prvdata;
 
 	prvdata->dev = dev;
 	prvdata->disable_monitor_mode = 0;
@@ -3553,8 +3582,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	}
 
 	aoc_configure_ssmt(pdev);
-
-	aoc_configure_sysmmu(prvdata);
 
 	if (!aoc_create_dma_buf_heaps(prvdata)) {
 		pr_err("Unable to create dma_buf heaps\n");
