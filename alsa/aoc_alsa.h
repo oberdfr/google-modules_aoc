@@ -24,6 +24,8 @@
 #include <sound/jack.h>
 #include <sound/soc.h>
 #include <linux/version.h>
+#include <linux/gpio/consumer.h>
+#include <linux/gpio.h>
 
 #include <sound/compress_params.h>
 #include <sound/compress_offload.h>
@@ -288,6 +290,8 @@ struct aoc_chip {
 	struct CMD_AUDIO_OUTPUT_USB_CONFIG usb_sink_cfg;
 	struct CMD_AUDIO_OUTPUT_USB_CONFIG_V2 usb_sink_cfg_v2;
 	struct CMD_AUDIO_OUTPUT_GET_SIDETONE sidetone_cfg;
+
+	struct gpio_desc *hac_amp_en_gpio;
 };
 
 struct aoc_alsa_stream {

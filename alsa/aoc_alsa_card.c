@@ -1445,6 +1445,17 @@ err_exit:
 	return ret;
 }
 
+static int aoc_of_parse_hac_amp(struct device_node *node,
+	struct snd_soc_card *card, struct snd_card_pdata *pdata)
+{
+	pdata->g_chip.hac_amp_en_gpio = devm_gpiod_get_optional(card->dev,
+			"hac_amp_en", GPIOD_OUT_LOW);
+	if (!IS_ERR(pdata->g_chip.hac_amp_en_gpio)) {
+		pr_info("platform has hac amp\n");
+	}
+	return 0;
+}
+
 static int aoc_of_parse_clk(struct device_node *np_clk,
 	struct snd_soc_card *card, u32 *clk_num, struct clk_ctrl **clks)
 {
@@ -1634,6 +1645,12 @@ static int aoc_snd_card_parse_of(struct device_node *node,
 	ret = aoc_of_parse_hs_jack(node, pdata);
 	if (ret) {
 		pr_err("%s: fail to parse hs jack %d", __func__, ret);
+		goto err;
+	}
+
+	ret = aoc_of_parse_hac_amp(node, card, pdata);
+	if (ret) {
+		pr_err("%s: fail to parse hac amp %d", __func__, ret);
 		goto err;
 	}
 
