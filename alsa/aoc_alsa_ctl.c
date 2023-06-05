@@ -442,6 +442,20 @@ static int incall_mic_sink_mute_ctl_set(struct snd_kcontrol *kcontrol,
 		pr_err("ERR:%d incall %s mute set to %d fail\n", err, (param == 0) ? "mic" : "sink",
 		       val);
 
+	chip->incall_mic_muted = val;
+
+	/* For incall mic only, update gain if it was set while muted */
+	if (param == 0 && val == 0) {
+		if (chip->incall_mic_gain_current != chip->incall_mic_gain_target) {
+			pr_info("Setting incall mic gain (deferred)\n");
+			err = aoc_incall_mic_gain_set(chip, val);
+			if (err < 0)
+				pr_err("ERR:%d incall mic gain set to %d fail\n", err,
+					val);
+			chip->incall_mic_gain_current = chip->incall_mic_gain_target;
+		}
+	}
+
 	mutex_unlock(&chip->audio_mutex);
 	return err;
 }
@@ -460,6 +474,49 @@ static int incall_mic_sink_mute_ctl_get(struct snd_kcontrol *kcontrol,
 	err = aoc_incall_mic_sink_mute_get(chip, param, &ucontrol->value.integer.value[0]);
 	if (err < 0)
 		pr_err("ERR:%d incall %s mute get fail\n", err, (param == 0) ? "mic" : "sink");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_mic_gain_set(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int gain, err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	gain = ucontrol->value.integer.value[0];
+	chip->incall_mic_gain_target = gain;
+	if (chip->incall_mic_muted) {
+		pr_info("Tried to set incall mic gain while mic was muted, deferring.");
+		mutex_unlock(&chip->audio_mutex);
+		return err;
+	}
+
+	err = aoc_incall_mic_gain_set(chip, gain);
+	if (err < 0)
+		pr_err("ERR:%d incall mic gain set to %d fail\n", err,
+		       gain);
+
+	chip->incall_mic_gain_current = gain;
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int incall_mic_gain_get(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->incall_mic_gain_current;
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -679,6 +736,42 @@ static int audio_capture_eraser_enable_ctl_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+static int hotword_tap_enable_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->hotword_tap_enable;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int hotword_tap_enable_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->hotword_tap_enable = ucontrol->value.integer.value[0];
+	err = aoc_hotword_tap_enable(chip, chip->hotword_tap_enable);
+	if (err < 0)
+		pr_err("ERR:%d hotword_tap %s fail\n", err,
+		       (chip->hotword_tap_enable) ? "Enable" : "Disable");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+#endif
+
 static int audio_cca_module_load_ctl_get(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
 {
@@ -708,6 +801,40 @@ static int audio_cca_module_load_ctl_set(struct snd_kcontrol *kcontrol,
 	if (err < 0)
 		pr_err("ERR:%d %s CCA fail\n", err,
 		       (chip->cca_module_loaded) ? "Load" : "Unload");
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
+static int audio_enable_cca_on_voip_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->enable_cca_on_voip;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int audio_enable_cca_on_voip_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->enable_cca_on_voip = ucontrol->value.integer.value[0];
+	err = aoc_enable_cca_on_voip(chip, chip->enable_cca_on_voip);
+	if (err < 0)
+		pr_err("ERR:%d %s CCA fail\n", err,
+		       (chip->enable_cca_on_voip) ? "Enable" : "Disable");
 
 	mutex_unlock(&chip->audio_mutex);
 	return err;
@@ -2147,6 +2274,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	SOC_SINGLE_EXT("Audio Capture Eraser Enable", SND_SOC_NOPM, 0, 1, 0,
 		       audio_capture_eraser_enable_ctl_get, audio_capture_eraser_enable_ctl_set),
+#if ! IS_ENABLED(CONFIG_SOC_GS101)
+	SOC_SINGLE_EXT("Hotword Tap Enable", SND_SOC_NOPM, 0, 1, 0,
+		       hotword_tap_enable_ctl_get, hotword_tap_enable_ctl_set),
+#endif
 
 	SOC_ENUM_EXT("Audio Capture Mic Source", audio_capture_mic_source_enum,
 		     audio_capture_mic_source_get, audio_capture_mic_source_set),
@@ -2214,6 +2345,10 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		       incall_mic_sink_mute_ctl_set),
 	SOC_SINGLE_EXT("Incall Sink Mute", SND_SOC_NOPM, 1, 1, 0, incall_mic_sink_mute_ctl_get,
 		       incall_mic_sink_mute_ctl_set),
+
+	/* Incall mic gain */
+	SOC_SINGLE_RANGE_EXT_TLV_modified("Incall Mic Gain (dB)", SND_SOC_NOPM,
+		0, -128, 128, 0, incall_mic_gain_get, incall_mic_gain_set, NULL),
 
 	/* Incall playback0 and playback1 mic source choice */
 	SOC_SINGLE_EXT("Incall Playback0 Mic Channel", SND_SOC_NOPM, 0, 2, 0, incall_playback_mic_channel_ctl_get,
@@ -2297,6 +2432,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	SOC_SINGLE_EXT("CCA Module Load", SND_SOC_NOPM, 0, 1, 0,
 		       audio_cca_module_load_ctl_get, audio_cca_module_load_ctl_set),
+
+	SOC_SINGLE_EXT("Enable CCA ON VOIP", SND_SOC_NOPM, 0, 1, 0,
+		       audio_enable_cca_on_voip_ctl_get, audio_enable_cca_on_voip_ctl_set),
 
 	SOC_SINGLE_EXT("Gapless Offload Enable", SND_SOC_NOPM, 0, 1, 0,
 		       audio_gapless_offload_ctl_get, audio_gapless_offload_ctl_set),

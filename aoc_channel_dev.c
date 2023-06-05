@@ -72,6 +72,8 @@ static int aocc_remove(struct aoc_service_dev *dev);
 static const char * const channel_service_names[] = {
 	"com.google.usf",
 	"com.google.usf.non_wake_up",
+	"com.google.chre",
+	"com.google.chre.non_wake_up",
 	"usf_sh_mem_doorbell",
 	NULL,
 };
@@ -210,8 +212,8 @@ static int aocc_demux_kthread(void *data)
 			if (channel == entry->channel_index) {
 				handler_found = 1;
 				if (!node->msg.non_wake_up &&
-				    strcmp(dev_name(&service->dev),
-					   "com.google.usf") == 0) {
+				    (strcmp(dev_name(&service->dev),"com.google.usf") == 0 ||
+				     strcmp(dev_name(&service->dev),"com.google.chre") == 0)) {
 					take_wake_lock = true;
 				}
 
@@ -858,7 +860,7 @@ static int aocc_prepare(struct device *dev)
 	struct aoc_service_dev *service = container_of(parent, struct aoc_service_dev, dev);
 	int rc;
 
-	if (strcmp(dev_name(dev), "usf_sh_mem_doorbell") == 0)
+	if (strcmp(dev_name(dev), "com.google.usf") != 0)
 		return 0;
 
 	rc = aocc_send_cmd_msg(service, AOCC_CMD_SUSPEND_PREPARE, 0);
@@ -874,7 +876,7 @@ static void aocc_complete(struct device *dev)
 	struct aoc_service_dev *service = container_of(parent, struct aoc_service_dev, dev);
 	int rc;
 
-	if (strcmp(dev_name(dev), "usf_sh_mem_doorbell") == 0)
+	if (strcmp(dev_name(dev), "com.google.usf") != 0)
 		return;
 
 	rc = aocc_send_cmd_msg(service, AOCC_CMD_WAKEUP_COMPELTE, 0);
