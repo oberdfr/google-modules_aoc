@@ -39,6 +39,7 @@ kernel_module(
     deps = [
         "//private/google-modules/amplifiers/audiometrics",
         "//private/google-modules/aoc",
+        "//private/google-modules/display/samsung:display.samsung",
         "//private/google-modules/soc/gs:gs_soc_module",
     ],
 )
