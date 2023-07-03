@@ -570,10 +570,9 @@ static int allocate_mailbox_channels(struct aoc_prvdata *prv)
 		slot = &prv->mbox_channels[i];
 		slot->channel = mbox_request_channel(&slot->client, i);
 		if (IS_ERR(slot->channel)) {
-			dev_err(dev, "failed to find mailbox interface %d : %ld\n", i,
-				PTR_ERR(slot->channel));
+			rc = PTR_ERR(slot->channel);
+			dev_err(dev, "failed to find mailbox interface %d : %ld\n", i, rc);
 			slot->channel = NULL;
-			rc = -EIO;
 			goto err_mbox_req;
 		}
 	}
@@ -3243,10 +3242,8 @@ static void aoc_cleanup_resources(struct platform_device *pdev)
 
 static void release_gsa_device(void *prv)
 {
-	struct aoc_prvdata *prvdata = prv;
-
-	put_device(prvdata->gsa_dev);
-	prvdata->gsa_dev = NULL;
+	struct device *gsa_device = (struct device *)prv;
+	put_device(gsa_device);
 }
 
 static int find_gsa_device(struct aoc_prvdata *prvdata)
@@ -3270,7 +3267,7 @@ static int find_gsa_device(struct aoc_prvdata *prvdata)
 	}
 	prvdata->gsa_dev = &gsa_pdev->dev;
 	return devm_add_action_or_reset(prvdata->dev, release_gsa_device,
-					prvdata);
+					&gsa_pdev->dev);
 }
 
 static int aoc_core_suspend(struct device *dev)
@@ -3414,10 +3411,9 @@ static int aoc_platform_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, prvdata);
 
-	ret = allocate_mailbox_channels(prvdata);
-	if (ret) {
-		dev_err(dev, "failed to allocate mailbox channels %d\n", ret);
-		rc = -ENOMEM;
+	rc = allocate_mailbox_channels(prvdata);
+	if (rc) {
+		dev_err(dev, "failed to allocate mailbox channels %d\n", rc);
 		goto err_mem_resources;
 	}
 
@@ -3610,7 +3606,6 @@ err_mem_resources:
 err_memnode:
 	deinit_chardev(prvdata);
 err_chardev:
-	kfree(prvdata);
 err_failed_prvdata_alloc:
 err_platform_not_null:
 	return rc;
