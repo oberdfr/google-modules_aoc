@@ -364,7 +364,7 @@ static int wc_mbox_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	dev_dbg(dev, "probe completed successfully\n");
+	dev_info(dev, "probe completed successfully\n");
 
 	return 0;
 }
