@@ -33,8 +33,14 @@ static void free_aoc_service_work_handler(struct work_struct *work)
 		return;
 
 	aoc_timer_stop_sync(alsa_stream);
+	atomic_set(&alsa_stream->cancel_work_active, 1);
 	audio_free_isr(alsa_stream->dev);
-	cancel_work_sync(&alsa_stream->pcm_period_work);
+	if (alsa_stream->pcm_period_wq) {
+		flush_workqueue(alsa_stream->pcm_period_wq);
+		destroy_workqueue(alsa_stream->pcm_period_wq);
+		alsa_stream->pcm_period_wq = NULL;
+	}
+	atomic_set(&alsa_stream->cancel_work_active, 0);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
 		pr_err("ERR: interrupted while waiting for lock\n");
@@ -201,15 +207,19 @@ static enum hrtimer_restart aoc_pcm_irq_process(struct aoc_alsa_stream *alsa_str
 		alsa_stream->pos = (consumed - alsa_stream->hw_ptr_base) % alsa_stream->buffer_size;
 	}
 
-	if (!queue_work(system_highpri_wq, &alsa_stream->pcm_period_work)) {
+	/* Do not queue a work if the cancel_work is active */
+	if (atomic_read(&alsa_stream->cancel_work_active) > 0 || alsa_stream->pcm_period_wq == NULL)
+		return HRTIMER_RESTART;
+
+	if (!queue_work(alsa_stream->pcm_period_wq, &alsa_stream->pcm_period_work)) {
 		wake_up(&alsa_stream->substream->runtime->sleep);
 		wake_up(&alsa_stream->substream->runtime->tsleep);
-		alsa_stream->wq_busy_count ++;
-	} else {
-		if (alsa_stream->wq_busy_count > 5)
+		alsa_stream->wq_busy_count++;
+
+		if (!(alsa_stream->wq_busy_count % 5))
 			pr_warn("period work busy count = %d\n", alsa_stream->wq_busy_count);
+	} else
 		alsa_stream->wq_busy_count = 0;
-	}
 
 	return HRTIMER_RESTART;
 }
@@ -279,6 +289,7 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	struct aoc_service_dev *dev = NULL;
 	int idx;
 	int err;
+	char wqname[33];
 
 	pr_debug("stream (%d)\n", substream->number); /* Playback or capture */
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
@@ -304,9 +315,18 @@ static int snd_aoc_pcm_open(struct snd_soc_component *component,
 	alsa_stream->idx = idx;
 	alsa_stream->stream_type = aoc_pcm_device_to_stream_type(idx);
 	alsa_stream->wq_busy_count = 0;
+	atomic_set(&alsa_stream->cancel_work_active, 0);
 
 	INIT_WORK(&alsa_stream->free_aoc_service_work, free_aoc_service_work_handler);
 	INIT_WORK(&alsa_stream->pcm_period_work, aoc_pcm_period_work_handler);
+	scnprintf(wqname, sizeof(wqname), "alsa_pcm_period_work_%d", alsa_stream->idx);
+	alsa_stream->pcm_period_wq =
+		alloc_ordered_workqueue("%s", WQ_HIGHPRI, wqname);
+	if (!alsa_stream->pcm_period_wq) {
+		err = -ENOMEM;
+		pr_err("ERR: fail to alloc workqueue for %s", rtd->dai_link->name);
+		goto out;
+	}
 
 	/* Find the corresponding aoc audio service */
 	err = alloc_aoc_audio_service(rtd->dai_link->name, &dev, aoc_pcm_reset_handler,
@@ -364,7 +384,11 @@ out:
 
 	if (alsa_stream) {
 		cancel_work_sync(&alsa_stream->free_aoc_service_work);
-		cancel_work_sync(&alsa_stream->pcm_period_work);
+		if (alsa_stream->pcm_period_wq) {
+			flush_workqueue(alsa_stream->pcm_period_wq);
+			destroy_workqueue(alsa_stream->pcm_period_wq);
+			alsa_stream->pcm_period_wq = NULL;
+		}
 		kfree(alsa_stream);
 	}
 
@@ -384,8 +408,14 @@ static int snd_aoc_pcm_close(struct snd_soc_component *component,
 
 	pr_debug("%s: name %s substream %p", __func__, rtd->dai_link->name, substream);
 	aoc_timer_stop_sync(alsa_stream);
+	atomic_set(&alsa_stream->cancel_work_active, 1);
 	audio_free_isr(alsa_stream->dev);
-	cancel_work_sync(&alsa_stream->pcm_period_work);
+	if (alsa_stream->pcm_period_wq) {
+		flush_workqueue(alsa_stream->pcm_period_wq);
+		destroy_workqueue(alsa_stream->pcm_period_wq);
+		alsa_stream->pcm_period_wq = NULL;
+	}
+	atomic_set(&alsa_stream->cancel_work_active, 0);
 
 	if (mutex_lock_interruptible(&chip->audio_mutex)) {
 		pr_err("ERR: interrupted while waiting for lock\n");

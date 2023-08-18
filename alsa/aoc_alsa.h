@@ -294,6 +294,7 @@ struct aoc_alsa_stream {
 	int entry_point_idx; /* Index of entry point, same as idx in playback */
 	int stream_type; /* Normal pcm, incall, mmap, hifi, compr */
 	int isr_type; /* timer, interrupt */
+	atomic_t cancel_work_active;
 
 	int channels; /* Number of channels in audio */
 	int params_rate; /* Sampling rate */
@@ -313,6 +314,9 @@ struct aoc_alsa_stream {
 	int wq_busy_count;
 
 	struct work_struct free_aoc_service_work;
+	struct workqueue_struct *pcm_period_wq;
+	struct workqueue_struct *incall_period_wq;
+	struct workqueue_struct *voip_period_wq;
 	struct work_struct pcm_period_work;
 };
 
