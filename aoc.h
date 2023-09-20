@@ -234,6 +234,7 @@ void aoc_trigger_watchdog(const char *reason);
 
 extern u32 gs_chipid_get_revision(void);
 extern u32 gs_chipid_get_type(void);
+extern u32 gs_chipid_get_product_id(void);
 
 bool aoc_release_from_reset(struct aoc_prvdata *prvdata);
 
@@ -334,6 +335,7 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCChipRevision = 0x1012,
 	kAOCChipType =  0x1013,
 	kAOCGnssType =  0x1014,
+	kAOCChipProductId = 0x1015,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \
