@@ -285,6 +285,55 @@ bool aoc_fw_ready(void);
 
 u32 dt_property(struct device_node *node, const char *key);
 
+bool aoc_release_from_reset(struct aoc_prvdata *prvdata);
+
+void *aoc_sram_translate(u32 offset);
+
+void request_aoc_on(struct aoc_prvdata *p, bool status);
+int wait_for_aoc_status(struct aoc_prvdata *p, bool status);
+
+int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
+	struct aoc_module_parameters *aoc_module_params);
+
+int platform_specific_probe(struct platform_device *pdev, struct aoc_prvdata *prvdata);
+
+int start_firmware_load(struct device *dev);
+
+void reset_sensor_power(struct aoc_prvdata *prvdata, bool is_init);
+
+void aoc_configure_hardware(struct aoc_prvdata *prvdata);
+
+void trigger_aoc_ramdump(struct aoc_prvdata *prvdata);
+
+bool aoc_create_dma_buf_heaps(struct aoc_prvdata *prvdata);
+
+phys_addr_t aoc_dram_translate_to_aoc(struct aoc_prvdata *p, phys_addr_t addr);
+
+long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg);
+
+int configure_watchdog_interrupt(struct platform_device *pdev, struct aoc_prvdata *prvdata);
+
+int configure_sysmmu_interrupts(struct device *dev, struct device_node *sysmmu_node,
+		struct aoc_prvdata *prvdata);
+
+void aoc_configure_ssmt(struct platform_device *pdev);
+
+int aoc_num_services(void);
+
+aoc_service *service_at_index(struct aoc_prvdata *prvdata,
+					    unsigned int index);
+
+struct aoc_service_dev *service_dev_at_index(struct aoc_prvdata *prvdata,
+							unsigned int index);
+
+bool validate_service(struct aoc_prvdata *prv, int i);
+
+bool aoc_is_valid_dram_address(struct aoc_prvdata *prv, void *addr);
+
+bool aoc_fw_ready(void);
+
+u32 dt_property(struct device_node *node, const char *key);
+
 #define AOC_SERVICE_NAME_LENGTH 32
 
 /* Rings should have the ring flag set, slots = 1, size = ring size
