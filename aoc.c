@@ -111,7 +111,11 @@ static bool aoc_panic_on_req_timeout = true;
 module_param(aoc_panic_on_req_timeout, bool, 0644);
 MODULE_PARM_DESC(aoc_panic_on_req_timeout, "Enable kernel panic when aoc_req times out.");
 
-static struct aoc_module_parameters *aoc_module_params;
+static struct aoc_module_parameters aoc_module_params = {
+	.aoc_autoload_firmware = &aoc_autoload_firmware,
+	.aoc_disable_restart = &aoc_disable_restart,
+	.aoc_panic_on_req_timeout = &aoc_panic_on_req_timeout,
+};
 
 static int aoc_core_suspend(struct device *dev);
 static int aoc_core_resume(struct device *dev);
@@ -850,7 +854,7 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 	int i;
 
 	atomic_inc(&prvdata->aoc_process_active);
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	ret += scnprintf(buf, PAGE_SIZE, "Services : %d\n", services);
@@ -938,7 +942,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
 	size_t reason_str_len = min(MAX_RESET_REASON_STRING_LEN, count);
 
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
+	if (aoc_state != AOC_STATE_ONLINE) {
 		dev_err(dev, "Reset requested while AoC is not online");
 		return -ENODEV;
 	}
@@ -976,7 +980,6 @@ static ssize_t force_reload_store(struct device *dev, struct device_attribute *a
 
 	strlcpy(prvdata->ap_reset_reason, "Force Reload AoC", AP_RESET_REASON_LENGTH);
 	prvdata->ap_triggered_reset = true;
-
 	schedule_work(&prvdata->watchdog_work);
 
 	return count;
@@ -1534,7 +1537,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 	int rc;
 
 	/* check if devices/services are ready */
-	if (aoc_state == AOC_STATE_ONLINE) {
+	if (aoc_state == AOC_STATE_ONLINE || aoc_state == AOC_STATE_SSR) {
 		pr_notice("taking aoc offline\n");
 		aoc_state = AOC_STATE_OFFLINE;
 
@@ -1598,7 +1601,7 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 
 	atomic_inc(&prvdata->aoc_process_active);
 
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	services = aoc_num_services();
@@ -1687,6 +1690,7 @@ static void aoc_watchdog(struct work_struct *work)
 	struct aoc_section_header *crash_info_section =
 		find_ramdump_section(ramdump_header, SECTION_TYPE_CRASH_INFO);
 
+	aoc_state = AOC_STATE_SSR;
 	prvdata->total_restarts++;
 
 	/* Initialize crash_info[0] to identify if it has changed later in the function. */
@@ -1858,7 +1862,7 @@ err_coredump:
 
 	mutex_lock(&aoc_service_lock);
 	aoc_take_offline(prvdata);
-	restart_rc = aoc_watchdog_restart(prvdata, aoc_module_params);
+	restart_rc = aoc_watchdog_restart(prvdata, &aoc_module_params);
 	if (restart_rc == AOC_RESTART_DISABLED_RC) {
 		dev_info(prvdata->dev, "aoc subsystem restart is disabled\n");
 	} else if (restart_rc) {
@@ -2155,7 +2159,7 @@ static int aoc_core_suspend(struct device *dev)
 	int i = 0;
 
 	atomic_inc(&prvdata->aoc_process_active);
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	for (i = 0; i < total_services; i++) {
@@ -2178,7 +2182,7 @@ static int aoc_core_resume(struct device *dev)
 	int i = 0;
 
 	atomic_inc(&prvdata->aoc_process_active);
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	for (i = 0; i < total_services; i++) {
@@ -2259,13 +2263,6 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	int ret;
 	int rc;
 	int i;
-	struct aoc_module_parameters module_params = {
-			.aoc_autoload_firmware = aoc_autoload_firmware,
-			.aoc_disable_restart = aoc_disable_restart,
-			.aoc_panic_on_req_timeout = aoc_panic_on_req_timeout
-	};
-
-	aoc_module_params = &module_params;
 
 	if (aoc_platform_device != NULL) {
 		dev_err(dev,
