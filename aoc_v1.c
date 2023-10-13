@@ -25,6 +25,7 @@
 #define SSMT_NS_READ_PID(n)	(0x4000 + 4 * (n))
 #define SSMT_NS_WRITE_PID(n)	(0x4200 + 4 * (n))
 
+extern enum AOC_FW_STATE aoc_state;
 extern struct platform_device *aoc_platform_device;
 extern struct resource *aoc_sram_resource;
 extern struct mutex aoc_service_lock;
@@ -132,7 +133,7 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 	if (!pcu)
 		return -ENODEV;
 
-	if (aoc_module_params->aoc_disable_restart)
+	if (*(aoc_module_params->aoc_disable_restart))
 		return AOC_RESTART_DISABLED_RC;
 
 	aoc_reset_successful = false;
@@ -174,7 +175,7 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 		}
 	}
 
-	if (aoc_req_rc && aoc_module_params->aoc_panic_on_req_timeout) {
+	if (aoc_req_rc && *(aoc_module_params->aoc_panic_on_req_timeout)) {
 		dev_err(prvdata->dev, "timed out too many times waiting for aoc_ack, triggering kernel panic\n");
 		panic("AoC kernel panic: timed out waiting for aoc_ack");
 	}
@@ -415,6 +416,7 @@ static irqreturn_t watchdog_int_handler(int irq, void *dev)
 	/* AP shouldn't access AoC registers to clear the IRQ. */
 	/* Mask the IRQ until the IRQ gets cleared by AoC reset during SSR. */
 	disable_irq_nosync(irq);
+	aoc_state = AOC_STATE_SSR;
 	schedule_work(&prvdata->watchdog_work);
 
 	return IRQ_HANDLED;

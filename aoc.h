@@ -52,7 +52,8 @@ enum AOC_FW_STATE {
 	AOC_STATE_OFFLINE,
 	AOC_STATE_FIRMWARE_LOADED,
 	AOC_STATE_STARTING,
-	AOC_STATE_ONLINE
+	AOC_STATE_ONLINE,
+	AOC_STATE_SSR
 };
 
 struct mbox_slot {
@@ -181,9 +182,9 @@ struct aoc_prvdata {
 };
 
 struct aoc_module_parameters {
-	bool aoc_autoload_firmware;
-	bool aoc_disable_restart;
-	bool aoc_panic_on_req_timeout;
+	bool *aoc_autoload_firmware;
+	bool *aoc_disable_restart;
+	bool *aoc_panic_on_req_timeout;
 };
 
 #define AOC_DEVICE(_d) container_of((_d), struct aoc_service_dev, dev)
