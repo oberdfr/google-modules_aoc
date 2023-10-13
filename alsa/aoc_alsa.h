@@ -82,6 +82,8 @@ enum uc_device_id {
 
 #define N_MIC_IN_SPATIAL_MODULE 3
 
+#define MAX_DP_START_THRESHOLD 19200 // 2ch * 16bit * 48000 * 100ms
+
 /* TODO: the exact number has to be determined based on hardware platform*/
 #define MAX_NUM_OF_SUBSTREAMS 64
 #define MAX_NUM_OF_SINKS 5
@@ -241,6 +243,8 @@ struct aoc_chip {
 
 	struct aoc_service_dev *dev_alsa_stream[MAX_NUM_OF_SUBSTREAMS];
 	struct aoc_service_dev *dp_dev;
+	size_t dp_start_threshold;
+	int dp_starting;
 	int default_mic_id;
 	int buildin_mic_id_list[NUM_OF_BUILTIN_MIC];
 	int buildin_us_mic_id_list[NUM_OF_BUILTIN_MIC];
@@ -301,6 +305,7 @@ struct aoc_chip {
 	int usb_card;
 	int usb_device;
 	int usb_direction;
+	int mel_enable;
 
 	bool hotword_supported;
 	bool chre_supported;
@@ -344,6 +349,9 @@ struct aoc_alsa_stream {
 	unsigned int period_size;
 	unsigned int buffer_size;
 	unsigned int pos;
+	unsigned int prev_pos;
+	unsigned int pos_delta;
+	unsigned long prev_buffer_cnt;
 	unsigned long hw_ptr_base; /* read/write pointers in ring buffer */
 	unsigned long prev_consumed;
 	int n_overflow;
@@ -365,6 +373,7 @@ void aoc_timer_restart(struct aoc_alsa_stream *alsa_stream);
 void aoc_timer_stop(struct aoc_alsa_stream *alsa_stream);
 void aoc_timer_stop_sync(struct aoc_alsa_stream *alsa_stream);
 void aoc_pcm_period_work_handler(struct work_struct *work);
+bool aoc_pcm_update_pos(struct aoc_alsa_stream *alsa_stream, unsigned long consumed);
 
 int snd_aoc_new_ctl(struct aoc_chip *chip);
 int snd_aoc_new_pcm(struct aoc_chip *chip);
@@ -440,6 +449,9 @@ int aoc_lvm_enable_set(struct aoc_chip *chip, long enable);
 int aoc_decoder_ref_enable_get(struct aoc_chip *chip, long*enable);
 int aoc_decoder_ref_enable_set(struct aoc_chip *chip, long enable);
 
+int aoc_mel_enable(struct aoc_chip *chip, int enable);
+int aoc_mel_rs2_set(struct aoc_chip *chip, long *rs2);
+int aoc_mel_rs2_get(struct aoc_chip *chip, long *rs2);
 
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable);
 int aoc_sidetone_cfg_get(struct aoc_chip *chip, int param, long *val);
