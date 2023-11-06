@@ -79,7 +79,7 @@ int xhci_get_usb_audio_count(void);
 int xhci_offload_helper_init(void);
 int usb_vendor_helper_init(void);
 
-extern int dwc3_otg_host_ready(bool enabled);
+extern int dwc3_otg_host_ready(bool ready);
 extern bool aoc_alsa_usb_capture_enabled(void);
 extern bool aoc_alsa_usb_playback_enabled(void);
 
