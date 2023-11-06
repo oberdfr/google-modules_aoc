@@ -1930,6 +1930,39 @@ static int aoc_audio_chirp_interval_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int hac_amp_en_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (chip->hac_amp_en_gpio) {
+		ucontrol->value.integer.value[0] =
+			gpiod_get_value_cansleep(chip->hac_amp_en_gpio);
+	} else {
+		err = -EINVAL;
+		pr_err("not support hac amp\n");
+	}
+	return err;
+}
+
+static int hac_amp_en_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (chip->hac_amp_en_gpio) {
+		gpiod_set_value_cansleep(chip->hac_amp_en_gpio,
+				ucontrol->value.integer.value[0]?1:0);
+	} else {
+		err = -EINVAL;
+		pr_err("not support hac amp\n");
+	}
+	return err;
+}
+
+
 static int aoc_audio_chirp_interval_get(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
@@ -2621,6 +2654,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 		CHRE_GAIN_PATH_AEC, -1280, 1280, 0, aoc_audio_chre_src_gain_get, aoc_audio_chre_src_gain_set, NULL),
 	SOC_SINGLE_RANGE_EXT_TLV_modified("CHRE SRC AEC Timeout in MSec", SND_SOC_NOPM,
 		0, 0, 60000, 0, aoc_audio_chre_src_aec_timeout_get, aoc_audio_chre_src_aec_timeout_set, NULL),
+
+	SOC_SINGLE_EXT("HAC AMP EN", SND_SOC_NOPM, 0, 1, 0,
+		       hac_amp_en_get, hac_amp_en_set),
 };
 
 int snd_aoc_pdm_state(void *priv, int index)

@@ -142,6 +142,12 @@ int alloc_aoc_audio_service(const char *name, struct aoc_service_dev **dev, serv
 	*dev = NULL;
 
 	spin_lock(&service_lock);
+
+	if (!aoc_audio_online) {
+		err = -EPROBE_DEFER;
+		goto done;
+	}
+
 	for (i = 0; i < ARRAY_SIZE(service_lists); i++) {
 		if (strcmp(name, service_lists[i].name) == 0)
 			break;
@@ -401,7 +407,6 @@ static int aoc_alsa_probe(struct aoc_service_dev *adev)
 	spin_unlock(&service_lock);
 
 	if (nservices == ARRAY_SIZE(service_lists) && !drv_registered) {
-		snd_aoc_alsa_probe();
 		drv_registered = true;
 		dev_notice(dev, "alsa-aoc communication is ready!\n");
 	}
@@ -505,6 +510,7 @@ static int __init aoc_alsa_init(void)
 		init_waitqueue_head(&service_lists[i].wait_head);
 	}
 
+	snd_aoc_alsa_probe();
 	aoc_driver_register(&aoc_alsa_driver);
 
 	pr_debug("aoc alsa driver init done\n");
