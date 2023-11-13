@@ -17,9 +17,9 @@ kernel_module(
     srcs = glob([
         "**/*.c",
         "**/*.h",
+    ]) + [
         "Kbuild",
         "Makefile",
-    ]) + [
         "//private/google-modules/amplifiers/audiometrics:headers",
         "//private/google-modules/aoc:headers",
         "//private/google-modules/aoc_ipc:headers",
