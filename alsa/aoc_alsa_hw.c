@@ -3933,6 +3933,46 @@ int aoc_a2dp_set_enc_param(struct aoc_chip *chip, struct AUDIO_OUTPUT_BT_A2DP_EN
 	return err;
 }
 
+int aoc_pdm_mic_power_cfg_init(struct aoc_chip *chip, uint32_t *cfg, int count)
+{
+	int i, err = 0;
+	const int cmd_id = CMD_AUDIO_INPUT_SET_PARAMETER_ID;
+	const int block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	const int component = ASP_ID_NONE;
+	int key_base = 2; /* PDM_POWER */
+
+	/* Send cmd to AOC */
+	for (i = 0; i < count; i++) {
+		err = aoc_audio_set_parameters(cmd_id, block, component, key_base + i,
+			(int) cfg[i], chip);
+		if (err < 0) {
+			pr_err("ERR:%s %d\n", __func__, err);
+			return err;
+		}
+	}
+	return err;
+}
+
+int aoc_pdm_mic_power_cfg_get(struct aoc_chip *chip, uint32_t *cfg, int count)
+{
+	int i, err = 0;
+	const int cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
+	const int block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	const int component = ASP_ID_NONE;
+	int key_base = 2; /* PDM_POWER */
+
+	/* Send cmd to AOC */
+	for (i = 0; i < count; i++) {
+		err = aoc_audio_get_parameters(cmd_id, block, component, key_base + i,
+						&cfg[i], chip);
+		if (err < 0) {
+			pr_err("ERR:%s %d\n", __func__, err);
+			return err;
+		}
+	}
+	return err;
+}
+
 int aoc_audio_us_record(struct aoc_chip *chip, bool enable)
 {
 	int cmd_id, err = 0;

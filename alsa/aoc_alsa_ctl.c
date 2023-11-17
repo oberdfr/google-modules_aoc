@@ -92,6 +92,10 @@ static int snd_aoc_ctl_info(struct snd_kcontrol *kcontrol,
 		uinfo->count = NUM_OF_MIC_BROKEN_RECORD;
 		uinfo->value.integer.min = 0;
 		uinfo->value.integer.max = (1 << NUM_OF_BUILTIN_MIC) - 1;
+	} else if (kcontrol->private_value == BUILDIN_MIC_POWER_INIT) {
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
+		/* PDM and All MIC power control*/
+		uinfo->count = (NUM_OF_BUILTIN_MIC + 1) * sizeof(uint32_t);
 	}
 	return 0;
 }
@@ -2111,6 +2115,39 @@ static int aoc_audio_chre_src_aec_timeout_set(struct snd_kcontrol *kcontrol,
 	return err;
 }
 
+static int pdm_mic_power_init_put(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	/* includes PDM power setting */
+	aoc_pdm_mic_power_cfg_init(chip, (uint32_t *)ucontrol->value.bytes.data,
+		NUM_OF_BUILTIN_MIC + 1);
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+}
+
+static int pdm_mic_power_init_get(struct snd_kcontrol *kcontrol,
+				       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	/* includes PDM power setting */
+	aoc_pdm_mic_power_cfg_get(chip, (uint32_t *)ucontrol->value.bytes.data,
+		NUM_OF_BUILTIN_MIC + 1);
+
+	mutex_unlock(&chip->audio_mutex);
+	return 0;
+
+}
+
 static int a2dp_encoder_parameters_put(struct snd_kcontrol *kcontrol,
 				       struct snd_ctl_elem_value *ucontrol)
 {
@@ -2657,6 +2694,17 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 
 	SOC_SINGLE_EXT("HAC AMP EN", SND_SOC_NOPM, 0, 1, 0,
 		       hac_amp_en_get, hac_amp_en_set),
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.name = "BUILDIN_MIC_POWER_INIT",
+		.index = 0,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.private_value = BUILDIN_MIC_POWER_INIT,
+		.info = snd_aoc_ctl_info,
+		.get = pdm_mic_power_init_get,
+		.put = pdm_mic_power_init_put,
+		.count = 1,
+	},
 };
 
 int snd_aoc_pdm_state(void *priv, int index)

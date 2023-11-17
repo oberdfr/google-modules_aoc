@@ -190,6 +190,7 @@ enum { CTRL_VOL_MUTE, CTRL_VOL_UNMUTE };
 enum {
 	PCM_PLAYBACK_VOLUME,
 	PCM_PLAYBACK_MUTE,
+	BUILDIN_MIC_POWER_INIT,
 	BUILDIN_MIC_POWER_STATE,
 	BUILDIN_MIC_CAPTURE_LIST,
 	BUILDIN_US_MIC_CAPTURE_LIST,
@@ -412,6 +413,9 @@ int aoc_audio_set_ctls(struct aoc_chip *chip);
 
 int aoc_a2dp_get_enc_param_size(void);
 int aoc_a2dp_set_enc_param(struct aoc_chip *chip, struct AUDIO_OUTPUT_BT_A2DP_ENC_CFG *cfg);
+
+int aoc_pdm_mic_power_cfg_init(struct aoc_chip *chip, uint32_t *cfg, int idx);
+int aoc_pdm_mic_power_cfg_get(struct aoc_chip *chip, uint32_t *cfg, int idx);
 
 int aoc_set_builtin_mic_power_state(struct aoc_chip *chip, int iMic, int state);
 int aoc_get_builtin_mic_power_state(struct aoc_chip *chip, int iMic);
