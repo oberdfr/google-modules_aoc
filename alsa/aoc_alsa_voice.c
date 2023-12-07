@@ -9,6 +9,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/dma-mapping.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/version.h>
@@ -293,6 +294,9 @@ static int snd_aoc_pcm_prepare(struct snd_soc_component *component,
 static int aoc_pcm_new(struct snd_soc_component *component, struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_pcm_substream *substream = NULL;
+
+	dma_set_mask_and_coherent(component->dev, DMA_BIT_MASK(64));
+
 	/* Allocate DMA memory */
 	if (rtd->dai_link->dpcm_playback) {
 		substream =
