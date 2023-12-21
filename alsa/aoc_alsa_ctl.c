@@ -1136,6 +1136,7 @@ static int voice_pcm_wait_time_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 static int audio_mel_enable_ctl_get(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
 {
@@ -1204,6 +1205,7 @@ static int audio_mel_rs2_ctl_set(struct snd_kcontrol *kcontrol,
 	mutex_unlock(&chip->audio_mutex);
 	return err;
 }
+#endif
 
 static int audio_capture_mic_source_get(struct snd_kcontrol *kcontrol,
 					struct snd_ctl_elem_value *ucontrol)
@@ -2661,10 +2663,12 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 			MAX_DP_START_THRESHOLD, 0,
 			dp_start_threshold_get, dp_start_threshold_set),
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 	SOC_SINGLE_EXT("Mel Processor Enable", SND_SOC_NOPM, 0, 1, 0,
 		       audio_mel_enable_ctl_get, audio_mel_enable_ctl_set),
 	SOC_SINGLE_EXT("Mel Processor RS2", SND_SOC_NOPM, 0, INT_MAX, 0,
 		       audio_mel_rs2_ctl_get, audio_mel_rs2_ctl_set),
+#endif
 
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,

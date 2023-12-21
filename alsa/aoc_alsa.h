@@ -310,7 +310,9 @@ struct aoc_chip {
 	int usb_card;
 	int usb_device;
 	int usb_direction;
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 	int mel_enable;
+#endif
 
 	bool hotword_supported;
 	bool chre_supported;
@@ -460,9 +462,11 @@ int aoc_lvm_enable_set(struct aoc_chip *chip, long enable);
 int aoc_decoder_ref_enable_get(struct aoc_chip *chip, long*enable);
 int aoc_decoder_ref_enable_set(struct aoc_chip *chip, long enable);
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 int aoc_mel_enable(struct aoc_chip *chip, int enable);
 int aoc_mel_rs2_set(struct aoc_chip *chip, long *rs2);
 int aoc_mel_rs2_get(struct aoc_chip *chip, long *rs2);
+#endif
 
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable);
 int aoc_sidetone_cfg_get(struct aoc_chip *chip, int param, long *val);

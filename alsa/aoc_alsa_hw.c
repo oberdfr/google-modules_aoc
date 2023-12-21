@@ -2437,6 +2437,7 @@ int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 int aoc_mel_enable(struct aoc_chip *chip, int enable)
 {
 	int err = 0;
@@ -2489,6 +2490,7 @@ int aoc_mel_rs2_get(struct aoc_chip *chip, long *rs2)
 
 	return err;
 }
+#endif
 
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable)
 {
