@@ -721,7 +721,7 @@ static int aoc_compr_get_metadata(struct snd_soc_component *component,
 static int snd_audiocodec_to_aoc_decoder(int snd_type, int codec_param)
 {
 	pr_info("%s: snd_type=%x, codec_param=%x\n", __func__, snd_type, codec_param);
-#if ! IS_ENABLED(CONFIG_SOC_GS101)
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 	if (((codec_param >> 16) & 0xFFFF) == AOC_CODEC_TAG) {
 		int codec = codec_param & 0xFFFF;
 		if (codec == AOC_CODEC_OPUS)
