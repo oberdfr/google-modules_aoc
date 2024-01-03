@@ -7,11 +7,11 @@ kernel_module(
     srcs = glob([
         "**/*.c",
         "**/*.h",
+    ]) + [
         "Kbuild",
         "Makefile",
-    ]) + [
-        "//private/google-modules/aoc_ipc:headers",
         "//private/google-modules/aoc:headers",
+        "//private/google-modules/aoc_ipc:headers",
         "//private/google-modules/soc/gs:gs_soc_headers",
     ],
     outs = [
