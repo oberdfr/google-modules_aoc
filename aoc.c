@@ -487,6 +487,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 rand_seed = get_random_u32();
 	u32 chip_revision = gs_chipid_get_revision();
 	u32 chip_type = gs_chipid_get_type();
+	u32 chip_product_id = gs_chipid_get_product_id();
 	u32 dt_gnss_type = dt_property(prvdata->dev->of_node, "gnss-type");
 	u32 gnss_type = dt_gnss_type == 0xffffffff ? 0 : dt_gnss_type;
 	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
@@ -516,7 +517,8 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCChipRevision, .value = chip_revision },
 		{ .key = kAOCChipType, .value = chip_type },
 		{ .key = kAOCGnssType, .value = gnss_type },
-		{ .key = kAOCVolteReleaseMif, .value = volte_release_mif }
+		{ .key = kAOCVolteReleaseMif, .value = volte_release_mif },
+		{ .key = kAOCChipProductId, .value = chip_product_id },
 	};
 
 	const char *version;
