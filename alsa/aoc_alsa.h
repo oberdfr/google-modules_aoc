@@ -36,6 +36,7 @@
 #include "usbaudio.h"
 #include "audiometrics.h"
 
+#define AOC_SND_CARD "aoc-snd-card"
 #define ALSA_AOC_CMD "alsa-aoc"
 #define CMD_INPUT_CHANNEL "audio_input_control"
 #define CMD_OUTPUT_CHANNEL "audio_output_control"
