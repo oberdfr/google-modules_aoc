@@ -9,6 +9,7 @@ filegroup(
         "uapi/*.h",
     ]),
     visibility = [
+        # keep sorted
         ":__subpackages__",
         "//private/devices/google:__subpackages__",
         "//private/google-modules/touch/common:__pkg__",
@@ -20,9 +21,9 @@ kernel_module(
     srcs = glob([
         "**/*.c",
         "**/*.h",
+    ]) + [
         "Kbuild",
         "Makefile",
-    ]) + [
         "//private/google-modules/aoc_ipc:sources",
         "//private/google-modules/soc/gs:gs_soc_headers",
         "//private/google-modules/trusty:headers",
