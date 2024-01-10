@@ -63,8 +63,12 @@ static const char *const audio_service_names[] = {
 	"audio_ultrasonic",
 	"audio_immersive",
 	"audio_capture_inject",
+#if IS_ENABLED(CONFIG_SOC_GS201) || IS_ENABLED(CONFIG_SOC_ZUMA)
 	"audio_hotword_tap",
+#endif
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 	"audio_displayport",
+#endif
 	NULL,
 };
 
