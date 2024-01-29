@@ -437,7 +437,14 @@ EXPORT_SYMBOL_GPL(aoc_unlocked_ioctl_handle_ion_fd);
 
 static irqreturn_t watchdog_int_handler(int irq, void *dev)
 {
-	trigger_aoc_ssr(false, NULL);
+	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
+
+	/* AP shouldn't access AoC registers to clear the IRQ. */
+	/* Mask the IRQ until the IRQ gets cleared by AoC reset during SSR. */
+	disable_irq_nosync(irq);
+	aoc_state = AOC_STATE_SSR;
+	schedule_work(&prvdata->watchdog_work);
+
 	return IRQ_HANDLED;
 }
 
@@ -535,9 +542,6 @@ void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable)
 	} else {
 		disable_irq(prvdata->sysmmu_nonsecure_irq);
 		disable_irq(prvdata->sysmmu_secure_irq);
-		/* Need to disable it to let APM handle it once we
-		 * retrigger it in aoc_watchdog_restart.
-		 */
 		disable_irq_nosync(prvdata->watchdog_irq);
 	}
 }

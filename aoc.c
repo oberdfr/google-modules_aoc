@@ -954,7 +954,10 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	if (prvdata->no_ap_resets) {
 		dev_err(dev, "Reset request rejected, option disabled via persist options");
 	} else {
-		trigger_aoc_ssr(true, reason_str);
+		configure_crash_interrupts(prvdata, false);
+		strlcpy(prvdata->ap_reset_reason, reason_str, AP_RESET_REASON_LENGTH);
+		prvdata->ap_triggered_reset = true;
+		schedule_work(&prvdata->watchdog_work);
 	}
 	return count;
 }
@@ -971,7 +974,13 @@ static ssize_t force_reload_store(struct device *dev, struct device_attribute *a
 	while (work_busy(&prvdata->watchdog_work) || work_busy(&prvdata->monitor_work.work));
 	prvdata->force_release_aoc = false;
 
-	trigger_aoc_ssr(true, "Force Reload AoC");
+	/* Disable IRQ if AoC is loaded for paired IRQ */
+	if (aoc_state != AOC_STATE_OFFLINE)
+		disable_irq_nosync(prvdata->watchdog_irq);
+
+	strlcpy(prvdata->ap_reset_reason, "Force Reload AoC", AP_RESET_REASON_LENGTH);
+	prvdata->ap_triggered_reset = true;
+	schedule_work(&prvdata->watchdog_work);
 
 	return count;
 }
@@ -1310,7 +1319,10 @@ static void aoc_monitor_online(struct work_struct *work)
 			/* TODO: figure out if this still causes APC watchdogs on GS201 */
 			return;
 
-		trigger_aoc_ssr(true, "AOC detected not online");
+		disable_irq_nosync(prvdata->watchdog_irq);
+		strlcpy(prvdata->ap_reset_reason, "Monitor Reset", AP_RESET_REASON_LENGTH);
+		prvdata->ap_triggered_reset = true;
+		schedule_work(&prvdata->watchdog_work);
 	}
 }
 
@@ -1664,22 +1676,6 @@ void aoc_remove_map_handler(struct aoc_service_dev *dev)
 }
 EXPORT_SYMBOL_GPL(aoc_remove_map_handler);
 
-void trigger_aoc_ssr(bool ap_triggered_reset, char* reset_reason) {
-	struct aoc_prvdata *prvdata = platform_get_drvdata(aoc_platform_device);
-	mutex_lock(&aoc_service_lock);
-	if (aoc_state != AOC_STATE_SSR) {
-		configure_crash_interrupts(prvdata, false);
-		if (ap_triggered_reset) {
-			strlcpy(prvdata->ap_reset_reason, reset_reason, AP_RESET_REASON_LENGTH);
-			prvdata->ap_triggered_reset = true;
-		}
-		schedule_work(&prvdata->watchdog_work);
-	} else {
-		dev_err(prvdata->dev, "Reset request rejected, AOC already in SSR");
-	}
-	mutex_unlock(&aoc_service_lock);
-}
-
 static void aoc_watchdog(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
@@ -1703,28 +1699,16 @@ static void aoc_watchdog(struct work_struct *work)
 	int sscd_rc;
 	char crash_info[RAMDUMP_SECTION_CRASH_INFO_SIZE];
 	int restart_rc;
-	bool ap_triggered_reset, valid_magic;
+	bool ap_reset = false, valid_magic;
 	struct aoc_section_header *crash_info_section;
 
-	/* If we're already in SSR state, do nothing. */
-	mutex_lock(&aoc_service_lock);
-	if (aoc_state == AOC_STATE_SSR) {
-		mutex_unlock(&aoc_service_lock);
-		return;
-	} else {
-		aoc_state = AOC_STATE_SSR;
-		mutex_unlock(&aoc_service_lock);
-	}
-
+	aoc_state = AOC_STATE_SSR;
 	prvdata->total_restarts++;
-
-	ap_triggered_reset = prvdata->ap_triggered_reset;
-	prvdata->ap_triggered_reset = false;
 
 	/* Initialize crash_info[0] to identify if it has changed later in the function. */
 	crash_info[0] = 0;
 
-	if (ap_triggered_reset) {
+	if (prvdata->ap_triggered_reset) {
 		if ((ktime_get_real_ns() - prvdata->last_reset_time_ns) / 1000000
 			<= prvdata->reset_hysteresis_trigger_ms) {
 			/* If the watchdog was triggered recently, busy wait to
@@ -1756,9 +1740,11 @@ static void aoc_watchdog(struct work_struct *work)
 		goto err_coredump;
 	}
 
-	if (ap_triggered_reset) {
+	if (prvdata->ap_triggered_reset) {
 		dev_info(prvdata->dev, "AP triggered reset, reason: [%s]",
 			prvdata->ap_reset_reason);
+		prvdata->ap_triggered_reset = false;
+		ap_reset = true;
 		trigger_aoc_ramdump(prvdata);
 	}
 
@@ -1836,7 +1822,7 @@ static void aoc_watchdog(struct work_struct *work)
 		sscd_info.segs[0].addr = prvdata->dram_virt;
 	}
 
-	if (ap_triggered_reset) {
+	if (ap_reset) {
 		/* Prefer the user specified reason */
 		scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s", prvdata->ap_reset_reason);
 	}
