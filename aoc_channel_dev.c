@@ -56,6 +56,7 @@ static DEFINE_MUTEX(aocc_write_lock);
 static DEFINE_MUTEX(s_open_files_lock);
 
 #define AOCC_MAX_MSG_SIZE 1024
+
 static atomic_t channel_index_counter = ATOMIC_INIT(1);
 
 static u32 aocc_max_pending_msgs;

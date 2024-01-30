@@ -2,15 +2,28 @@
 
 load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
 
+filegroup(
+    name = "headers",
+    srcs = glob([
+        "*.h",
+    ]),
+    visibility = [
+        "//private/google-modules/display/samsung:__pkg__",
+    ],
+)
+
 kernel_module(
     name = "alsa",
     srcs = glob([
         "**/*.c",
         "**/*.h",
-        "Kbuild",
     ]) + [
+        "Kbuild",
+        "Makefile",
+        "//private/google-modules/amplifiers/audiometrics:headers",
         "//private/google-modules/aoc:headers",
         "//private/google-modules/aoc_ipc:headers",
+        "//private/google-modules/display/samsung:headers",
         "//private/google-modules/soc/gs:gs_soc_headers",
     ],
     outs = [
@@ -20,10 +33,13 @@ kernel_module(
     kernel_build = "//private/google-modules/soc/gs:gs_kernel_build",
     visibility = [
         "//private/devices/google:__subpackages__",
+        "//private/google-modules/aoc/usb:__pkg__",
         "//private/google-modules/soc/gs:__pkg__",
     ],
     deps = [
+        "//private/google-modules/amplifiers/audiometrics",
         "//private/google-modules/aoc",
+        "//private/google-modules/display/samsung:display.samsung",
         "//private/google-modules/soc/gs:gs_soc_module",
     ],
 )

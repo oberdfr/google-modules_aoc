@@ -13,7 +13,7 @@
 #include "aoc_alsa_drv.h"
 #include "aoc_alsa_path.h"
 
-#include <linux/modem_notifier.h>
+#include "modem_notifier.h"
 
 #ifndef ALSA_AOC_CMD_LOG_DISABLE
 static int cmd_count;
@@ -39,7 +39,7 @@ static int aoc_audio_sink[] = {
 	[PORT_BT_RX] = SINK_BT,           [PORT_BT_TX] = -1,
 	[PORT_INCALL_RX] = -1,            [PORT_INCALL_TX] = -1,
 	[PORT_INTERNAL_MIC] = -1,	  [PORT_HAPTIC_RX] = SINK_SPEAKER,
-	[PORT_INTERNAL_MIC_US] = -1,
+	[PORT_INTERNAL_MIC_US] = -1,      [PORT_DP_DMA_RX] = SINK_USB,
 };
 
 static int hw_id_to_sink(int hw_idx)
@@ -1188,6 +1188,51 @@ int aoc_set_usb_config_v2(struct aoc_chip *chip)
 	return err;
 }
 
+int aoc_set_usb_feedback_endpoint(struct aoc_chip *chip, struct usb_device *udev,
+			struct usb_host_endpoint *ep)
+{
+	struct usb_endpoint_descriptor *ep_desc = &ep->desc;
+	struct CMD_USB_CONTROL_SEND_FEEDBACK_EP_INFO cmd;
+	int err = 0;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_USB_CONTROL_SEND_FEEDBACK_EP_INFO_ID, sizeof(cmd));
+
+	cmd.enabled = true;
+	cmd.bus_id = udev->bus->busnum;
+	cmd.dev_num = udev->devnum;
+	cmd.slot_id = udev->slot_id;
+	cmd.ep_num = usb_endpoint_num(ep_desc);
+	cmd.max_packet = ep_desc->wMaxPacketSize;
+	cmd.binterval = ep_desc->bInterval;
+	cmd.brefresh = ep_desc->bRefresh;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0) {
+		pr_err("ERR:%d in aoc set usb feedback endpoint\n", err);
+	}
+
+	return err;
+}
+
+int aoc_set_usb_offload_state(struct aoc_chip *chip, bool offload_enable)
+{
+	struct CMD_USB_CONTROL_SET_OFFLOAD_STATE cmd;
+	int err = 0;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_USB_CONTROL_SET_OFFLOAD_STATE_ID, sizeof(cmd));
+
+	cmd.offloading = offload_enable;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0) {
+		pr_err("ERR:%d in aoc set usb offload fail\n", err);
+	}
+
+	return err;
+}
+
 static int
 aoc_audio_playback_trigger_source(struct aoc_alsa_stream *alsa_stream, int cmd,
 				  int src)
@@ -1899,6 +1944,13 @@ static int aoc_audio_capture_trigger(struct aoc_alsa_stream *alsa_stream, int re
 
 	pr_info("%s: %d", __func__, record_cmd);
 
+	/* Update Buildin MIC broken state */
+	if (chip->audio_capture_mic_source == BUILTIN_MIC && record_cmd == STOP) {
+		chip->broken_detect_count %= NUM_OF_MIC_BROKEN_RECORD;
+		aoc_buildin_mic_broken_get(
+			chip, &chip->buildin_mic_broken_detect[chip->broken_detect_count++]);
+	}
+
 	if (alsa_stream->stream_type == NORMAL) {
 		err = ap_data_control_trigger(chip, alsa_stream, record_cmd);
 		if (err < 0)
@@ -2007,18 +2059,18 @@ int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute)
 	int err;
 	int cmd_id, block, component, key, value;
 
-	if (param == 0) /* Up link (mic) */
+	if (param == INCALL_MIC_ID) /* Up link (mic) */
 	{
 		cmd_id = CMD_AUDIO_OUTPUT_GET_PARAMETER_ID;
 		block = 19;
 		component = 0;
-		key = 6;
+		key = 16;
 	} else /* Download link (sink) */
 	{
 		cmd_id = CMD_AUDIO_OUTPUT_GET_PARAMETER_ID;
 		block = 19;
 		component = 30;
-		key = 6;
+		key = 16;
 	}
 
 	/* Send cmd to AOC */
@@ -2029,36 +2081,29 @@ int aoc_incall_mic_sink_mute_get(struct aoc_chip *chip, int param, long *mute)
 	}
 
 	if (mute)
-		*mute = (value == FLOAT_ZERO) ? 1 : 0;
+		*mute = (value <= MUTE_DB) ? INCALL_MUTE : INCALL_UNMUTE;
 
 	return 0;
 }
 
-int aoc_incall_mic_sink_mute_set(struct aoc_chip *chip, int param, long mute)
+int aoc_incall_mic_gain_set(struct aoc_chip *chip, int param, long gain)
 {
 	int err;
-	int cmd_id, block, component, key, value;
+	int cmd_id, block, component, key;
 
-	if (param == 0) /* Up link (mic) */
-	{
-		cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
-		block = 19;
+	cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
+	block = 19;
+	key = 16;
+
+	if (param == INCALL_MIC_ID) /* Up link (mic) */
 		component = 0;
-		key = 6;
-	} else /* Download link (sink) */
-	{
-		cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
-		block = 19;
+	else /* Download link (sink) */
 		component = 30;
-		key = 6;
-	}
-
-	value = mute ? FLOAT_ZERO : FLOAT_ONE;
 
 	/* Send cmd to AOC */
-	err = aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
+	err = aoc_audio_set_parameters(cmd_id, block, component, key, (int) gain, chip);
 	if (err < 0) {
-		pr_err("ERR:%d in incall mute set\n", err);
+		pr_err("ERR:%d in incall mic gain set\n", err);
 		return err;
 	}
 
@@ -2154,6 +2199,28 @@ int aoc_mmap_record_gain_set(struct aoc_chip *chip, long val)
 	return 0;
 }
 
+int aoc_buildin_mic_broken_get(struct aoc_chip *chip, int *val)
+{
+	int err;
+	int cmd_id, block, component, key, value;
+
+	cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
+	block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	component = 0;
+	key = 16;
+
+	/* Send cmd to AOC */
+	err = aoc_audio_get_parameters(cmd_id, block, component, key, &value, chip);
+	if (err < 0) {
+		pr_err("ERR:%d %s\n", err, __func__);
+		return err;
+	}
+
+	if (val)
+		*val = value;
+	return 0;
+}
+
 int aoc_audio_capture_eraser_enable(struct aoc_chip *chip, long enable)
 {
 	int cmd_id, err = 0;
@@ -2195,6 +2262,18 @@ int aoc_load_cca_module(struct aoc_chip *chip, long load)
 
 	cmd_id = (load == 1) ? CMD_AUDIO_OUTPUT_VOICE_CCA_START_ID :
 				       CMD_AUDIO_OUTPUT_VOICE_CCA_STOP_ID;
+	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
+
+	return err;
+}
+
+int aoc_enable_cca_on_voip(struct aoc_chip *chip, long enable)
+{
+	int cmd_id, err = 0;
+
+	cmd_id = (enable == 1) ?
+			CMD_AUDIO_OUTPUT_VOICE_ENABLE_CCA_ON_VOIP_ID :
+			CMD_AUDIO_OUTPUT_VOICE_DISABLE_CCA_ON_VOIP_ID;
 	err = aoc_audio_control_simple_cmd(CMD_OUTPUT_CHANNEL, cmd_id, chip);
 
 	return err;
@@ -2357,6 +2436,61 @@ int aoc_compr_offload_linear_gain_set(struct aoc_chip *chip, long *val)
 
 	return 0;
 }
+
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+int aoc_mel_enable(struct aoc_chip *chip, int enable)
+{
+	int err = 0;
+	struct CMD_AUDIO_OUTPUT_MEL_STATE cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_MEL_STATE_ID, sizeof(cmd));
+
+	cmd.enable = enable ? true : false;
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0)
+		pr_err("ERR:%d in mel enable\n", err);
+
+	return err;
+}
+
+int aoc_mel_rs2_set(struct aoc_chip *chip, long *rs2)
+{
+	int err = 0;
+	struct CMD_AUDIO_OUTPUT_MEL_RS2 cmd;
+	uint32_t tmp;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_MEL_SET_RS2_ID, sizeof(cmd));
+
+	tmp = (uint32_t)rs2[0];
+	cmd.rs2_value = *(float *)(&tmp);
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0)
+		pr_err("ERR:%d in mel rs2 set\n", err);
+
+	return err;
+}
+
+int aoc_mel_rs2_get(struct aoc_chip *chip, long *rs2)
+{
+	int err = 0;
+	struct CMD_AUDIO_OUTPUT_MEL_RS2 cmd;
+
+	AocCmdHdrSet(&(cmd.parent), CMD_AUDIO_OUTPUT_MEL_GET_RS2_ID, sizeof(cmd));
+
+	err = aoc_audio_control(CMD_OUTPUT_CHANNEL, (uint8_t *)&cmd, sizeof(cmd), (uint8_t *)&cmd,
+		chip);
+	if (err < 0)
+		pr_err("ERR:%d in mel rs2 get\n", err);
+	else
+		*rs2 = *(uint32_t *)&cmd.rs2_value;
+
+	return err;
+}
+#endif
 
 int aoc_sidetone_enable(struct aoc_chip *chip, int enable)
 {
@@ -2784,6 +2918,124 @@ int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 
 out:
 	return err < 0 ? err : 0;
+}
+
+int aoc_displayport_service_alloc(struct aoc_chip *chip)
+{
+	struct aoc_service_dev *dev;
+	int err = 0;
+	if (!chip)
+		return -ENODEV;
+	if (mutex_lock_interruptible(&chip->audio_cmd_chan_mutex))
+		return -EINTR;
+
+	err = alloc_aoc_audio_service(AOC_DISPLAYPORT_SERVICE, &dev, NULL, NULL);
+	if (err < 0)
+		goto error;
+
+	chip->dp_starting = 0;
+	chip->dp_dev = dev;
+error:
+	mutex_unlock(&chip->audio_cmd_chan_mutex);
+	return err;
+}
+
+int aoc_displayport_service_free(struct aoc_chip *chip)
+{
+	struct aoc_service_dev *dev;
+	if (!chip)
+		return -ENODEV;
+	if (mutex_lock_interruptible(&chip->audio_cmd_chan_mutex))
+		return -EINTR;
+
+	chip->dp_starting = 0;
+	dev = chip->dp_dev;
+	chip->dp_dev = NULL;
+	if (dev)
+		free_aoc_audio_service(AOC_DISPLAYPORT_SERVICE, dev);
+	mutex_unlock(&chip->audio_cmd_chan_mutex);
+	return 0;
+}
+
+int aoc_displayport_flush(struct aoc_chip *chip)
+{
+	struct aoc_service_dev *dev;
+	int err = 0;
+
+	if (!chip)
+		return -ENODEV;
+
+	dev = chip->dp_dev;
+
+	if (!dev)
+		return -EINVAL;
+
+	if (!aoc_ring_flush_read_data(dev->service, AOC_UP, 0)) {
+		dev_err(&dev->dev, "flush dp data failed\n");
+	}
+
+	return err;
+}
+
+int aoc_displayport_read(struct aoc_chip *chip, void *dest, size_t buf_size)
+{
+	struct aoc_service_dev *dev;
+	int err = 0;
+	size_t avail;
+
+	if (!chip || !dest)
+		return -ENODEV;
+
+	dev = chip->dp_dev;
+
+	if (!dev)
+		return -EINVAL;
+
+	memset(dest, 0, buf_size);
+
+	avail = aoc_ring_bytes_available_to_read(dev->service, AOC_UP);
+
+	if (avail == 0) {
+		dev_err(&dev->dev, "ERR: no data in diaplayport read\n");
+		err = -EINVAL;
+		goto done;
+	}
+	if (chip->dp_starting == 0) {
+		if (chip->dp_start_threshold == 0) {
+			dev_warn(&dev->dev, "use default start threshold\n");
+			chip->dp_start_threshold = buf_size * 2;
+		}
+		if (avail < chip->dp_start_threshold) {
+			dev_warn(&dev->dev,
+				"Wait more dp buffer to start. avail = %zu, threshold = %zu\n",
+				avail, chip->dp_start_threshold);
+			err = -EAGAIN;
+			goto done;
+		}
+		chip->dp_starting = 1;
+	}
+
+	if (unlikely(avail < buf_size)) {
+		dev_err(&dev->dev, "ERR: overrun in displayport read. avail = %zu, toread = %zu\n",
+		       avail, buf_size);
+		err = -EAGAIN;
+		goto done;
+	}
+
+	/* Only read bytes available in the ring buffer */
+	avail = min(avail, buf_size);
+	if (!avail)
+		goto done;
+
+	err = aoc_service_read(dev, (void *)dest, avail, NONBLOCKING);
+	if (unlikely(err != avail)) {
+		dev_err(&dev->dev, "ERR: %zu bytes not read from ring buffer\n",
+		       avail - err);
+		err = -EFAULT;
+	}
+
+done:
+	return err;
 }
 
 /* PCM channel setup ??? */
@@ -3453,8 +3705,7 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 		sizeof(cmd));
 
 	/* TODO: HAL only passes MP3 or AAC, need to consider/test other AAC options */
-	cmd.cfg.format = (type == SND_AUDIOCODEC_MP3) ? AUDIO_OUTPUT_DECODER_MP3 :
-							AUDIO_OUTPUT_DECODER_AAC_LC;
+	cmd.cfg.format = type;
 	cmd.cfg.samplerate = alsa_stream->params_rate;
 	cmd.cfg.channels = alsa_stream->channels;
 	cmd.address = 0;
@@ -3681,6 +3932,46 @@ int aoc_a2dp_set_enc_param(struct aoc_chip *chip, struct AUDIO_OUTPUT_BT_A2DP_EN
 	if (err < 0)
 		pr_err("ERR:%d set enc parameter failed\n", err);
 
+	return err;
+}
+
+int aoc_pdm_mic_power_cfg_init(struct aoc_chip *chip, uint32_t *cfg, int count)
+{
+	int i, err = 0;
+	const int cmd_id = CMD_AUDIO_INPUT_SET_PARAMETER_ID;
+	const int block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	const int component = ASP_ID_NONE;
+	int key_base = 2; /* PDM_POWER */
+
+	/* Send cmd to AOC */
+	for (i = 0; i < count; i++) {
+		err = aoc_audio_set_parameters(cmd_id, block, component, key_base + i,
+			(int) cfg[i], chip);
+		if (err < 0) {
+			pr_err("ERR:%s %d\n", __func__, err);
+			return err;
+		}
+	}
+	return err;
+}
+
+int aoc_pdm_mic_power_cfg_get(struct aoc_chip *chip, uint32_t *cfg, int count)
+{
+	int i, err = 0;
+	const int cmd_id = CMD_AUDIO_INPUT_GET_PARAMETER_ID;
+	const int block = 139; /* ABLOCK_INPUT_PDM_MIC */
+	const int component = ASP_ID_NONE;
+	int key_base = 2; /* PDM_POWER */
+
+	/* Send cmd to AOC */
+	for (i = 0; i < count; i++) {
+		err = aoc_audio_get_parameters(cmd_id, block, component, key_base + i,
+						&cfg[i], chip);
+		if (err < 0) {
+			pr_err("ERR:%s %d\n", __func__, err);
+			return err;
+		}
+	}
 	return err;
 }
 

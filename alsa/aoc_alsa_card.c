@@ -261,6 +261,7 @@ static const struct be_param_cache default_be_params[PORT_MAX] = {
 	MK_BE_PARAMS(INCALL_TX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
 	MK_TDM_BE_PARAMS(HAPTIC_RX, SNDRV_PCM_FORMAT_S32_LE,
 			4, 48000, 4, SNDRV_PCM_FORMAT_S32_LE)
+	MK_BE_PARAMS(DP_DMA_RX, SNDRV_PCM_FORMAT_S16_LE, 2, 48000)
 };
 
 static struct snd_soc_dai_link_component null_component = {
@@ -952,6 +953,7 @@ MK_HW_PARAM_CTRLS(USB_TX, "USB_TX");
 MK_HW_PARAM_CTRLS(INCALL_RX, "INCALL_RX");
 MK_HW_PARAM_CTRLS(INCALL_TX, "INCALL_TX");
 MK_TDM_HW_PARAM_CTRLS(HAPTIC_RX, "HAPTIC_RX");
+MK_HW_PARAM_CTRLS(DP_DMA_RX, "DP_DMA_RX");
 
 /*
  * The resource array that have ALSA controls, ops and fixup
@@ -979,6 +981,7 @@ static const struct dai_link_res_map be_res_map[PORT_MAX] = {
 	MK_BE_RES_ITEM(INCALL_RX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(INCALL_TX, &aoc_i2s_ops, hw_params_fixup)
 	MK_BE_RES_ITEM(HAPTIC_RX, &aoc_tdm_ops, hw_params_fixup)
+	MK_BE_RES_ITEM(DP_DMA_RX, &aoc_i2s_ops, hw_params_fixup)
 };
 
 static void put_component(struct snd_soc_dai_link_component *component,
@@ -1445,6 +1448,17 @@ err_exit:
 	return ret;
 }
 
+static int aoc_of_parse_hac_amp(struct device_node *node,
+	struct snd_soc_card *card, struct snd_card_pdata *pdata)
+{
+	pdata->g_chip.hac_amp_en_gpio = devm_gpiod_get_optional(card->dev,
+			"hac_amp_en", GPIOD_OUT_LOW);
+	if (!IS_ERR(pdata->g_chip.hac_amp_en_gpio)) {
+		pr_info("platform has hac amp\n");
+	}
+	return 0;
+}
+
 static int aoc_of_parse_clk(struct device_node *np_clk,
 	struct snd_soc_card *card, u32 *clk_num, struct clk_ctrl **clks)
 {
@@ -1637,6 +1651,12 @@ static int aoc_snd_card_parse_of(struct device_node *node,
 		goto err;
 	}
 
+	ret = aoc_of_parse_hac_amp(node, card, pdata);
+	if (ret) {
+		pr_err("%s: fail to parse hac amp %d", __func__, ret);
+		goto err;
+	}
+
 	ret = aoc_of_parse_clks(node, card, pdata);
 	if (ret) {
 		pr_err("%s: fail to parse clks %d", __func__, ret);
@@ -1819,6 +1839,10 @@ static int snd_aoc_init(struct aoc_chip *chip)
 		chip->buildin_us_mic_id_list[i] = -1;
 	}
 
+	for (i = 0; i < NUM_OF_MIC_BROKEN_RECORD; i++) {
+		chip->buildin_mic_broken_detect[i] = -1;
+	}
+
 	chip->default_sink_id = DEFAULT_AUDIO_SINK_ID;
 	chip->sink_id_list[0] = DEFAULT_AUDIO_SINK_ID;
 	for (i = 1; i < ARRAY_SIZE(chip->sink_id_list); i++) {
@@ -1849,6 +1873,11 @@ static int snd_aoc_init(struct aoc_chip *chip)
 	/* Default values for playback volume and mute */
 	chip->volume = 1000;
 	chip->mute = 1;
+
+	/* Default values for incall mic gain and mute */
+	chip->incall_mic_muted = false;
+	chip->incall_mic_gain_current = 0;
+	chip->incall_mic_gain_target = 0;
 
 	mutex_init(&chip->audio_mutex);
 	mutex_init(&chip->audio_cmd_chan_mutex);
@@ -1913,6 +1942,7 @@ static int aoc_snd_card_probe(struct platform_device *pdev)
 
 	pdata->g_chip.wakelock = wakeup_source_register(dev, dev_name(dev));
 
+	card->driver_name = AOC_SND_CARD;
 	card->owner = THIS_MODULE;
 	card->dev = dev;
 	card->late_probe = aoc_card_late_probe;

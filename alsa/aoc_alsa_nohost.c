@@ -109,6 +109,7 @@ static int aoc_nohost_new(struct snd_soc_component *component,
 			snd_aoc_nohost_hw.buffer_bytes_max,
 			snd_aoc_nohost_hw.buffer_bytes_max);
 	}
+	rtd->pcm->nonatomic = true;
 	return 0;
 }
 

@@ -481,11 +481,13 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 disable_mm = prvdata->disable_monitor_mode;
 	u32 enable_uart = prvdata->enable_uart_tx;
 	u32 force_speaker_ultrasonic = prvdata->force_speaker_ultrasonic;
+	u32 volte_release_mif = prvdata->volte_release_mif;
 	u32 board_id  = AOC_FWDATA_BOARDID_DFL;
 	u32 board_rev = AOC_FWDATA_BOARDREV_DFL;
 	u32 rand_seed = get_random_u32();
 	u32 chip_revision = gs_chipid_get_revision();
 	u32 chip_type = gs_chipid_get_type();
+	u32 chip_product_id = gs_chipid_get_product_id();
 	u32 dt_gnss_type = dt_property(prvdata->dev->of_node, "gnss-type");
 	u32 gnss_type = dt_gnss_type == 0xffffffff ? 0 : dt_gnss_type;
 	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
@@ -514,7 +516,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCRandSeed, .value = rand_seed },
 		{ .key = kAOCChipRevision, .value = chip_revision },
 		{ .key = kAOCChipType, .value = chip_type },
-		{ .key = kAOCGnssType, .value = gnss_type }
+		{ .key = kAOCGnssType, .value = gnss_type },
+		{ .key = kAOCVolteReleaseMif, .value = volte_release_mif },
+		{ .key = kAOCChipProductId, .value = chip_product_id },
 	};
 
 	const char *version;
@@ -852,7 +856,7 @@ static ssize_t services_show(struct device *dev, struct device_attribute *attr,
 	int i;
 
 	atomic_inc(&prvdata->aoc_process_active);
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	ret += scnprintf(buf, PAGE_SIZE, "Services : %d\n", services);
@@ -939,7 +943,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
 	char reason_str[MAX_RESET_REASON_STRING_LEN + 1];
 
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work)) {
+	if (aoc_state != AOC_STATE_ONLINE) {
 		dev_err(dev, "Reset requested while AoC is not online");
 		return -ENODEV;
 	}
@@ -976,7 +980,6 @@ static ssize_t force_reload_store(struct device *dev, struct device_attribute *a
 
 	strlcpy(prvdata->ap_reset_reason, "Force Reload AoC", AP_RESET_REASON_LENGTH);
 	prvdata->ap_triggered_reset = true;
-
 	schedule_work(&prvdata->watchdog_work);
 
 	return count;
@@ -1548,7 +1551,7 @@ static void aoc_take_offline(struct aoc_prvdata *prvdata)
 	int rc;
 
 	/* check if devices/services are ready */
-	if (aoc_state == AOC_STATE_ONLINE) {
+	if (aoc_state == AOC_STATE_ONLINE || aoc_state == AOC_STATE_SSR) {
 		pr_notice("taking aoc offline\n");
 		aoc_state = AOC_STATE_OFFLINE;
 
@@ -1613,7 +1616,7 @@ static void aoc_process_services(struct aoc_prvdata *prvdata, int offset)
 
 	atomic_inc(&prvdata->aoc_process_active);
 
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	services = aoc_num_services();
@@ -1699,6 +1702,7 @@ static void aoc_watchdog(struct work_struct *work)
 	bool ap_reset = false, valid_magic;
 	struct aoc_section_header *crash_info_section;
 
+	aoc_state = AOC_STATE_SSR;
 	prvdata->total_restarts++;
 
 	/* Initialize crash_info[0] to identify if it has changed later in the function. */
@@ -1818,7 +1822,6 @@ static void aoc_watchdog(struct work_struct *work)
 		sscd_info.segs[0].addr = prvdata->dram_virt;
 	}
 
-
 	if (ap_reset) {
 		/* Prefer the user specified reason */
 		scnprintf(crash_info, sizeof(crash_info), "AP Reset: %s", prvdata->ap_reset_reason);
@@ -1921,6 +1924,9 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 	case AOC_IOCTL_ION_FD_TO_HANDLE:
 	{
 		ret = aoc_unlocked_ioctl_handle_ion_fd(cmd, arg);
+		if (ret == -EINVAL) {
+			pr_err("invalid argument\n");
+		}
 	}
 	break;
 
@@ -2004,6 +2010,23 @@ static long aoc_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		prvdata->force_speaker_ultrasonic = force_sprk_ultrasonic;
 		if (prvdata->force_speaker_ultrasonic != 0)
 			pr_info("AoC Forcefully enabling Speaker Ultrasonic pipeline\n");
+
+		ret = 0;
+	}
+	break;
+
+	case AOC_IOCTL_VOLTE_RELEASE_MIF:
+	{
+		u32 volte_release_mif;
+
+		BUILD_BUG_ON(sizeof(volte_release_mif) != _IOC_SIZE(AOC_IOCTL_VOLTE_RELEASE_MIF));
+
+		if (copy_from_user(&volte_release_mif, (u32 *)arg, _IOC_SIZE(cmd)))
+			break;
+
+		prvdata->volte_release_mif = volte_release_mif;
+		if (prvdata->volte_release_mif != 0)
+			pr_info("AoC setting release Mif on Volte\n");
 
 		ret = 0;
 	}
@@ -2170,7 +2193,7 @@ static int aoc_core_suspend(struct device *dev)
 	int i = 0;
 
 	atomic_inc(&prvdata->aoc_process_active);
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	for (i = 0; i < total_services; i++) {
@@ -2193,7 +2216,7 @@ static int aoc_core_resume(struct device *dev)
 	int i = 0;
 
 	atomic_inc(&prvdata->aoc_process_active);
-	if (aoc_state != AOC_STATE_ONLINE || work_busy(&prvdata->watchdog_work))
+	if (aoc_state != AOC_STATE_ONLINE)
 		goto exit;
 
 	for (i = 0; i < total_services; i++) {

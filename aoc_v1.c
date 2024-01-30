@@ -25,6 +25,7 @@
 #define SSMT_NS_READ_PID(n)	(0x4000 + 4 * (n))
 #define SSMT_NS_WRITE_PID(n)	(0x4200 + 4 * (n))
 
+extern enum AOC_FW_STATE aoc_state;
 extern struct platform_device *aoc_platform_device;
 extern struct resource *aoc_sram_resource;
 extern struct mutex aoc_service_lock;
@@ -375,12 +376,26 @@ bool aoc_create_dma_buf_heaps(struct aoc_prvdata *prvdata)
 }
 EXPORT_SYMBOL_GPL(aoc_create_dma_buf_heaps);
 
+/* Returns true if `base` is located within the aoc dram carveout */
+static bool is_aoc_dma_buf(struct aoc_prvdata *prvdata, phys_addr_t base) {
+	phys_addr_t dram_carveout_start;
+	phys_addr_t dram_carveout_end;
+
+	dram_carveout_start = prvdata->dram_resource.start;
+	dram_carveout_end = dram_carveout_start + resource_size(&prvdata->dram_resource);
+	return (base <= dram_carveout_end && base >= dram_carveout_start);
+}
+
 long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg)
 {
 	struct aoc_ion_handle handle;
 	struct dma_buf *dmabuf;
 	struct samsung_dma_buffer *dma_heap_buf;
+
+	struct ion_physical_heap *phys_heap;
+	phys_addr_t base;
 	long ret = -EINVAL;
+	struct aoc_prvdata *prvdata = platform_get_drvdata(aoc_platform_device);
 
 	BUILD_BUG_ON(sizeof(struct aoc_ion_handle) !=
 				_IOC_SIZE(AOC_IOCTL_ION_FD_TO_HANDLE));
@@ -398,6 +413,19 @@ long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg)
 	dma_heap_buf = dmabuf->priv;
 	handle.handle = (u64)dma_heap_buf->priv;
 
+	/*
+	 * Ensure base is in aoc dram carveout. Ensures that the dmabuf
+	 * is created and maintained by AoC.
+	 */
+	base = 0;
+	if (dma_heap_buf->heap->priv) {
+		phys_heap = dma_heap_buf->heap->priv;
+		base = phys_heap->base;
+	}
+
+	if (!(is_aoc_dma_buf(prvdata, base)))
+		return ret;
+
 	dma_buf_put(dmabuf);
 
 	if (!copy_to_user((struct aoc_ion_handle *)arg, &handle, _IOC_SIZE(cmd)))
@@ -414,6 +442,7 @@ static irqreturn_t watchdog_int_handler(int irq, void *dev)
 	/* AP shouldn't access AoC registers to clear the IRQ. */
 	/* Mask the IRQ until the IRQ gets cleared by AoC reset during SSR. */
 	disable_irq_nosync(irq);
+	aoc_state = AOC_STATE_SSR;
 	schedule_work(&prvdata->watchdog_work);
 
 	return IRQ_HANDLED;
