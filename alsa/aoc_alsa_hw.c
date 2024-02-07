@@ -13,7 +13,9 @@
 #include "aoc_alsa_drv.h"
 #include "aoc_alsa_path.h"
 
+#if IS_ENABLED(CONFIG_EXYNOS_MODEM_IF)
 #include "modem_notifier.h"
+#endif
 
 #ifndef ALSA_AOC_CMD_LOG_DISABLE
 static int cmd_count;
@@ -3608,7 +3610,9 @@ int prepare_phonecall(struct aoc_alsa_stream *alsa_stream)
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem start fail\n", err);
 
+#if IS_ENABLED(CONFIG_EXYNOS_MODEM_IF)
 	modem_voice_call_notify_event(MODEM_VOICE_CALL_ON, NULL);
+#endif
 
 	return err;
 }
@@ -3630,7 +3634,9 @@ int teardown_phonecall(struct aoc_alsa_stream *alsa_stream)
 	if (err < 0)
 		pr_err("ERR:%d Telephony modem stop fail\n", err);
 
+#if IS_ENABLED(CONFIG_EXYNOS_MODEM_IF)
 	modem_voice_call_notify_event(MODEM_VOICE_CALL_OFF, NULL);
+#endif
 
 	return err;
 }

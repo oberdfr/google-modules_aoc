@@ -57,6 +57,7 @@ kernel_module(
         "//private/google-modules/aoc/alsa:radio_s5300_dit": ["//private/google-modules/radio/samsung/s5300:cpif_headers"],
         "//private/google-modules/aoc/alsa:radio_s5300": ["//private/google-modules/radio/samsung/s5300:cpif_headers"],
         "//private/google-modules/aoc/alsa:radio_s5400": ["//private/google-modules/radio/samsung/s5400:cpif_headers"],
+        "//conditions:default": [],
     }),
     outs = [
         "aoc_alsa_dev.ko",
@@ -77,5 +78,6 @@ kernel_module(
         "//private/google-modules/aoc/alsa:radio_s5300_dit": ["//private/google-modules/radio/samsung/s5300:cpif.dit"],
         "//private/google-modules/aoc/alsa:radio_s5300": ["//private/google-modules/radio/samsung/s5300:cpif"],
         "//private/google-modules/aoc/alsa:radio_s5400": ["//private/google-modules/radio/samsung/s5400:cpif"],
+        "//conditions:default": [],
     }),
 )
