@@ -395,6 +395,7 @@ enum AOC_FIRMWARE_INFORMATION {
 	kAOCGnssType =  0x1014,
 	kAOCVolteReleaseMif = 0x1015,
 	kAOCChipProductId = 0x1016,
+	kAOCWifiChip = 0x1017,
 };
 
 #define module_aoc_driver(__aoc_driver)                                        \

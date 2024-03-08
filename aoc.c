@@ -489,7 +489,9 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	u32 chip_type = gs_chipid_get_type();
 	u32 chip_product_id = gs_chipid_get_product_id();
 	u32 dt_gnss_type = dt_property(prvdata->dev->of_node, "gnss-type");
-	u32 gnss_type = dt_gnss_type == 0xffffffff ? 0 : dt_gnss_type;
+	u32 gnss_type = dt_gnss_type == DT_PROPERTY_NOT_FOUND ? 0 : dt_gnss_type;
+	u32 dt_wifi_chip = dt_property(prvdata->dev->of_node, "wifi-chip");
+	u32 wifi_chip = dt_wifi_chip == DT_PROPERTY_NOT_FOUND ? 0 : dt_wifi_chip;
 	bool dt_prevent_aoc_load = (dt_property(prvdata->dev->of_node, "prevent-fw-load")==1);
 	phys_addr_t sensor_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->sensor_heap_base);
 	phys_addr_t playback_heap = aoc_dram_translate_to_aoc(prvdata, prvdata->audio_playback_heap_base);
@@ -519,6 +521,7 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 		{ .key = kAOCGnssType, .value = gnss_type },
 		{ .key = kAOCVolteReleaseMif, .value = volte_release_mif },
 		{ .key = kAOCChipProductId, .value = chip_product_id },
+		{ .key = kAOCWifiChip, .value = wifi_chip },
 	};
 
 	const char *version;
