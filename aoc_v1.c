@@ -41,11 +41,8 @@ static int aoc_itmon_notifier(struct notifier_block *nb, unsigned long action,
 	if (itmon_info->port && (strncmp(itmon_info->port, "AOC", sizeof("AOC") - 1) == 0))
 		return NOTIFY_STOP;
 
-	if (itmon_info->target_addr == 0) {
-		dev_err(prvdata->dev,
-			"Possible repro of b/174577569, please upload a bugreport and /data/vendor/ssrdump to that bug\n");
+	if (itmon_info->target_addr == 0)
 		return NOTIFY_STOP;
-	}
 
 	if ((itmon_info->target_addr >= aoc_sram_resource->start +
 			prvdata->aoc_cp_aperture_start_offset) &&
