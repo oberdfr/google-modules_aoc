@@ -200,16 +200,16 @@ int aoc_watchdog_restart(struct aoc_prvdata *prvdata,
 	       prvdata->aoc_s2mpu_virt + AOC_S2MPU_CTRL_PROTECTION_ENABLE_PER_VID_CLR);
 #endif
 
-	/* Restore SysMMU settings by briefly setting AoC to runtime active. Since SysMMU is a
+	/* Restore IOMMU settings by briefly setting AoC to runtime active. Since IOMMU is a
 	 * supplier to AoC, it will be set to runtime active as a side effect. */
 	rc = pm_runtime_set_active(prvdata->dev);
 	if (rc < 0) {
-		dev_err(prvdata->dev, "sysmmu restore failed: pm_runtime_resume rc = %d\n", rc);
+		dev_err(prvdata->dev, "iommu restore failed: pm_runtime_resume rc = %d\n", rc);
 		return rc;
 	}
 	rc = pm_runtime_set_suspended(prvdata->dev);
 	if (rc < 0) {
-		dev_err(prvdata->dev, "sysmmu restore failed: pm_runtime_suspend rc = %d\n", rc);
+		dev_err(prvdata->dev, "iommu restore failed: pm_runtime_suspend rc = %d\n", rc);
 		return rc;
 	}
 
@@ -306,27 +306,27 @@ int configure_watchdog_interrupt(struct platform_device *pdev, struct aoc_prvdat
 }
 EXPORT_SYMBOL_GPL(configure_watchdog_interrupt);
 
-int configure_sysmmu_interrupts(struct device *dev, struct device_node *sysmmu_node,
+int configure_iommu_interrupts(struct device *dev, struct device_node *iommu_node,
 		struct aoc_prvdata *prvdata)
 {
-	int rc = 0, ret = of_irq_get(sysmmu_node, 0);
+	int rc = 0, ret = of_irq_get(iommu_node, 0);
 
 	if (ret < 0) {
-		dev_err(dev, "failed to find sysmmu non-secure irq: %d\n", ret);
+		dev_err(dev, "failed to find iommu non-secure irq: %d\n", ret);
 		rc = ret;
 		return rc;
 	}
-	prvdata->sysmmu_nonsecure_irq = ret;
-	ret = of_irq_get(sysmmu_node, 1);
+	prvdata->iommu_nonsecure_irq = ret;
+	ret = of_irq_get(iommu_node, 1);
 	if (ret < 0) {
-		dev_err(dev, "failed to find sysmmu secure irq: %d\n", ret);
+		dev_err(dev, "failed to find iommu secure irq: %d\n", ret);
 		rc = ret;
 		return rc;
 	}
-	prvdata->sysmmu_secure_irq = ret;
+	prvdata->iommu_secure_irq = ret;
 	return rc;
 }
-EXPORT_SYMBOL_GPL(configure_sysmmu_interrupts);
+EXPORT_SYMBOL_GPL(configure_iommu_interrupts);
 
 #if IS_ENABLED(CONFIG_SOC_GS101)
 void aoc_configure_ssmt(struct platform_device *pdev)
@@ -362,19 +362,19 @@ EXPORT_SYMBOL_GPL(aoc_configure_ssmt);
 void configure_crash_interrupts(struct aoc_prvdata *prvdata, bool enable)
 {
 	if (prvdata->first_fw_load) {
-		/* Default irq state of watchdog is off and sysmmu is on.
+		/* Default irq state of watchdog is off and iommu is on.
 		 * When loading aoc firmware in first time
 		 * Enable only irq of watchdog for balance irq state
 		 */
 		enable_irq(prvdata->watchdog_irq);
 		prvdata->first_fw_load = false;
 	} else if (enable) {
-		enable_irq(prvdata->sysmmu_nonsecure_irq);
-		enable_irq(prvdata->sysmmu_secure_irq);
+		enable_irq(prvdata->iommu_nonsecure_irq);
+		enable_irq(prvdata->iommu_secure_irq);
 		enable_irq(prvdata->watchdog_irq);
 	} else {
-		disable_irq_nosync(prvdata->sysmmu_nonsecure_irq);
-		disable_irq_nosync(prvdata->sysmmu_secure_irq);
+		disable_irq_nosync(prvdata->iommu_nonsecure_irq);
+		disable_irq_nosync(prvdata->iommu_secure_irq);
 		/* Need to disable it to let APM handle it once we
 		 * retrigger it in aoc_watchdog_restart.
 		 */

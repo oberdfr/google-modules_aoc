@@ -130,8 +130,8 @@ static int aoc_bus_match(struct device *dev, struct device_driver *drv);
 static int aoc_bus_probe(struct device *dev);
 static void aoc_bus_remove(struct device *dev);
 
-static void aoc_configure_sysmmu_fault_handler(struct aoc_prvdata *p);
-static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw);
+static void aoc_configure_iommu_fault_handler(struct aoc_prvdata *p);
+static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw);
 
 static struct bus_type aoc_bus_type = {
 	.name = "aoc",
@@ -621,14 +621,14 @@ static void aoc_fw_callback(const struct firmware *fw, void *ctx)
 	if (gsa_enabled) {
 		int rc;
 
-		aoc_configure_sysmmu_fault_handler(prvdata);
+		aoc_configure_iommu_fault_handler(prvdata);
 		rc = aoc_fw_authenticate(prvdata, fw);
 		if (rc) {
 			dev_err(dev, "GSA: FW authentication failed: %d\n", rc);
 			goto free_fw;
 		}
 	} else {
-		aoc_configure_sysmmu(prvdata, fw);
+		aoc_configure_iommu(prvdata, fw);
 		write_reset_trampoline(fw);
 	}
 
@@ -1218,7 +1218,7 @@ static int aoc_iommu_fault_handler(struct iommu_fault *fault, void *token)
 	return -EAGAIN;
 }
 
-static void aoc_configure_sysmmu_fault_handler(struct aoc_prvdata *p)
+static void aoc_configure_iommu_fault_handler(struct aoc_prvdata *p)
 {
 	struct device *dev = p->dev;
 	int rc = iommu_register_device_fault_handler(dev, aoc_iommu_fault_handler, dev);
@@ -1227,76 +1227,76 @@ static void aoc_configure_sysmmu_fault_handler(struct aoc_prvdata *p)
 		dev_err(dev, "iommu_register_device_fault_handler failed: rc = %d\n", rc);
 }
 
-static void aoc_configure_sysmmu(struct aoc_prvdata *p, const struct firmware *fw)
+static void aoc_configure_iommu(struct aoc_prvdata *p, const struct firmware *fw)
 {
 	int rc;
 	size_t i, j, cnt;
-	struct sysmmu_entry *sysmmu;
+	struct iommu_entry *iommu;
 	struct iommu_domain *domain = p->domain;
 	struct device *dev = p->dev;
-	u16 sysmmu_offset, sysmmu_size;
+	u16 iommu_offset, iommu_size;
 
-	if (p->sysmmu_configured && p->sysmmu_config_persistent) {
-		dev_info(dev, "SysMMU already configured skipping\n");
+	if (p->iommu_configured && p->iommu_config_persistent) {
+		dev_info(dev, "IOMMU already configured skipping\n");
 		return;
 	}
 
-	aoc_configure_sysmmu_fault_handler(p);
+	aoc_configure_iommu_fault_handler(p);
 
-	sysmmu_offset = _aoc_fw_sysmmu_offset(fw);
-	sysmmu_size = _aoc_fw_sysmmu_size(fw);
-	if (!_aoc_fw_is_valid_sysmmu_size(fw)) {
-		dev_warn(dev, "Invalid sysmmu table (0x%x @ 0x%x)\n", sysmmu_size, sysmmu_offset);
+	iommu_offset = _aoc_fw_iommu_offset(fw);
+	iommu_size = _aoc_fw_iommu_size(fw);
+	if (!_aoc_fw_is_valid_iommu_size(fw)) {
+		dev_warn(dev, "Invalid iommu table (0x%x @ 0x%x)\n", iommu_size, iommu_offset);
 		return;
 	}
-	cnt = sysmmu_size / sizeof(struct sysmmu_entry);
-	sysmmu = _aoc_fw_sysmmu_entry(fw);
+	cnt = iommu_size / sizeof(struct iommu_entry);
+	iommu = _aoc_fw_iommu_entry(fw);
 
-	p->sysmmu_size = sysmmu_size;
-	p->sysmmu = devm_kzalloc(dev, sysmmu_size, GFP_KERNEL);
-	if (!p->sysmmu)
+	p->iommu_size = iommu_size;
+	p->iommu = devm_kzalloc(dev, iommu_size, GFP_KERNEL);
+	if (!p->iommu)
 		return;
 
-	memcpy(p->sysmmu, sysmmu, sysmmu_size);
+	memcpy(p->iommu, iommu, iommu_size);
 
 	for (i = 0; i < cnt; i++) {
-		rc = iommu_map(domain, SYSMMU_VADDR(sysmmu[i].value),
-						SYSMMU_PADDR(sysmmu[i].value),
-						SYSMMU_SIZE(sysmmu[i].value),
+		rc = iommu_map(domain, IOMMU_VADDR(iommu[i].value),
+						IOMMU_PADDR(iommu[i].value),
+						IOMMU_SIZE(iommu[i].value),
 						IOMMU_READ | IOMMU_WRITE);
 		if (rc < 0) {
 			dev_err(
 				dev,
-				"Failed configuring sysmmu: [err=%d] [index:%zu, vaddr: 0x%llx, paddr: 0x%llx, size: 0x%llx]\n",
-				rc, i, SYSMMU_VADDR(sysmmu[i].value), SYSMMU_PADDR(sysmmu[i].value),
-				SYSMMU_SIZE(sysmmu[i].value));
+				"Failed configuring iommu: [err=%d] [index:%zu, vaddr: 0x%llx, paddr: 0x%llx, size: 0x%llx]\n",
+				rc, i, IOMMU_VADDR(iommu[i].value), IOMMU_PADDR(iommu[i].value),
+				IOMMU_SIZE(iommu[i].value));
 			for (j = 0; j < i; j++) {
-				rc = iommu_unmap(domain, SYSMMU_VADDR(sysmmu[j].value),
-						SYSMMU_SIZE(sysmmu[j].value));
+				rc = iommu_unmap(domain, IOMMU_VADDR(iommu[j].value),
+						IOMMU_SIZE(iommu[j].value));
 				if (rc < 0)
-					dev_err(dev, "Failed unmapping sysmmu: %d\n", rc);
+					dev_err(dev, "Failed unmapping iommu: %d\n", rc);
 			}
 			return;
 		}
 	}
 
-	p->sysmmu_configured = true;
+	p->iommu_configured = true;
 }
 
-static void aoc_clear_sysmmu(struct aoc_prvdata *p)
+static void aoc_clear_iommu(struct aoc_prvdata *p)
 {
 	int rc;
 	struct iommu_domain *domain = p->domain;
 	size_t i, cnt;
 	struct device *dev = p->dev;
 
-	if (p->sysmmu != NULL) {
-		cnt = p->sysmmu_size / sizeof(struct sysmmu_entry);
+	if (p->iommu != NULL) {
+		cnt = p->iommu_size / sizeof(struct iommu_entry);
 		for (i = 0; i < cnt; i++) {
-			rc = iommu_unmap(domain, SYSMMU_VADDR(p->sysmmu[i].value),
-							SYSMMU_SIZE(p->sysmmu[i].value));
+			rc = iommu_unmap(domain, IOMMU_VADDR(p->iommu[i].value),
+							IOMMU_SIZE(p->iommu[i].value));
 			if (rc < 0)
-				dev_err(dev, "Failed umapping sysmmu: %d\n", rc);
+				dev_err(dev, "Failed umapping iommu: %d\n", rc);
 		}
 	}
 }
@@ -2172,7 +2172,7 @@ static void aoc_cleanup_resources(struct platform_device *pdev)
 		free_mailbox_channels(prvdata);
 
 		if (prvdata->domain) {
-			aoc_clear_sysmmu(prvdata);
+			aoc_clear_iommu(prvdata);
 			prvdata->domain = NULL;
 		}
 	}
@@ -2416,8 +2416,8 @@ static int platform_probe_parse_dt(struct device *dev, struct device_node *aoc_n
 		dev_err(dev, "AOC DT missing property mbox-channels");
 		return -EINVAL;
 	}
-	prvdata->sysmmu_config_persistent = of_property_read_bool(aoc_node,
-									"sysmmu-config-persistent");
+	prvdata->iommu_config_persistent = of_property_read_bool(aoc_node,
+									"iommu-config-persistent");
 
 	return 0;
 }
@@ -2426,7 +2426,7 @@ static int aoc_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct aoc_prvdata *prvdata = NULL;
-	struct device_node *aoc_node, *mem_node, *sysmmu_node;
+	struct device_node *aoc_node, *mem_node, *iommu_node;
 	struct resource *rsrc;
 	int ret;
 	int rc;
@@ -2536,16 +2536,16 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_watchdog_irq;
 
-	sysmmu_node = of_parse_phandle(aoc_node, "iommus", 0);
-	if (!sysmmu_node) {
-		dev_err(dev, "failed to find sysmmu device tree node\n");
+	iommu_node = of_parse_phandle(aoc_node, "iommus", 0);
+	if (!iommu_node) {
+		dev_err(dev, "failed to find iommu device tree node\n");
 		rc = -ENODEV;
-		goto err_watchdog_sysmmu_irq;
+		goto err_watchdog_iommu_irq;
 	}
-	ret = configure_sysmmu_interrupts(dev, sysmmu_node, prvdata);
+	ret = configure_iommu_interrupts(dev, iommu_node, prvdata);
 	if (ret < 0)
-		goto err_watchdog_sysmmu_irq;
-	of_node_put(sysmmu_node);
+		goto err_watchdog_iommu_irq;
+	of_node_put(iommu_node);
 
 	pr_notice("found aoc with interrupt:%d sram:%pR dram:%pR\n", aoc_irq,
 		  aoc_sram_resource, &prvdata->dram_resource);
@@ -2597,8 +2597,8 @@ static int aoc_platform_probe(struct platform_device *pdev)
 	prvdata->aoc_s2mpu_saved_value = ioread32(prvdata->aoc_s2mpu_virt + AOC_S2MPU_CTRL0);
 
 	pm_runtime_set_active(dev);
-	/* Leave AoC in suspended state. Otherwise, AoC SysMMU is set to active which results in the
-	 * SysMMU driver trying to access SysMMU SFRs during device suspend/resume operations. The
+	/* Leave AoC in suspended state. Otherwise, AoC IOMMU is set to active which results in the
+	 * IOMMU driver trying to access IOMMU SFRs during device suspend/resume operations. The
 	 * latter is problematic if AoC is in monitor mode and BLK_AOC is off. */
 
 	pm_runtime_set_suspended(dev);
@@ -2674,7 +2674,7 @@ err_find_iommu:
 err_s2mpu_map:
 err_sram_dram_map:
 
-err_watchdog_sysmmu_irq:
+err_watchdog_iommu_irq:
 err_watchdog_irq:
 err_mem_resources:
 	aoc_cleanup_resources(pdev);

@@ -147,8 +147,8 @@ struct aoc_prvdata {
 
 	u32 total_coredumps;
 	u32 total_restarts;
-	unsigned int sysmmu_nonsecure_irq;
-	unsigned int sysmmu_secure_irq;
+	unsigned int iommu_nonsecure_irq;
+	unsigned int iommu_secure_irq;
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)
 	struct notifier_block itmon_nb;
@@ -177,10 +177,10 @@ struct aoc_prvdata {
 	u32 aoc_clock_divider;
 	u32 aoc_mbox_channels;
 
-	u16 sysmmu_size;
-	struct sysmmu_entry *sysmmu;
-	bool sysmmu_configured;
-	bool sysmmu_config_persistent;
+	u16 iommu_size;
+	struct iommu_entry *iommu;
+	bool iommu_configured;
+	bool iommu_config_persistent;
 };
 
 struct aoc_module_parameters {
@@ -267,7 +267,7 @@ long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg);
 
 int configure_watchdog_interrupt(struct platform_device *pdev, struct aoc_prvdata *prvdata);
 
-int configure_sysmmu_interrupts(struct device *dev, struct device_node *sysmmu_node,
+int configure_iommu_interrupts(struct device *dev, struct device_node *iommu_node,
 		struct aoc_prvdata *prvdata);
 
 void aoc_configure_ssmt(struct platform_device *pdev);
@@ -316,7 +316,7 @@ long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg);
 
 int configure_watchdog_interrupt(struct platform_device *pdev, struct aoc_prvdata *prvdata);
 
-int configure_sysmmu_interrupts(struct device *dev, struct device_node *sysmmu_node,
+int configure_iommu_interrupts(struct device *dev, struct device_node *iommu_node,
 		struct aoc_prvdata *prvdata);
 
 void aoc_configure_ssmt(struct platform_device *pdev);
