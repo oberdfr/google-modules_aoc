@@ -45,6 +45,7 @@
 #include <soc/google/exynos-pmu-if.h>
 
 #include <linux/gsa/gsa_aoc.h>
+#include "ion_physical_heap.h"
 
 #include "aoc_firmware.h"
 #include "aoc_ramdump_regions.h"
@@ -2256,6 +2257,117 @@ static int aoc_core_resume(struct device *dev)
 exit:
 	atomic_dec(&prvdata->aoc_process_active);
 	return 0;
+}
+
+static void aoc_pheap_map(struct samsung_dma_buffer *buffer, void *ctx, bool should_map)
+{
+	struct device *dev = ctx;
+	struct aoc_prvdata *prvdata = dev_get_drvdata(dev);
+	struct sg_table *sg = &buffer->sg_table;
+	phys_addr_t phys;
+	size_t size;
+
+	if (sg->nents != 1) {
+		dev_warn(dev, "Unable to map sg_table with %d ents\n",
+			 sg->nents);
+		return;
+	}
+
+	phys = sg_phys(&sg->sgl[0]);
+	phys = aoc_dram_translate_to_aoc(prvdata, phys);
+	size = sg->sgl[0].length;
+
+	mutex_lock(&aoc_service_lock);
+	if (prvdata->map_handler) {
+		prvdata->map_handler((u64)buffer->priv, phys, size, should_map,
+				     prvdata->map_handler_ctx);
+	}
+	mutex_unlock(&aoc_service_lock);
+}
+
+static void aoc_pheap_alloc_cb(struct samsung_dma_buffer *buffer, void *ctx)
+{
+	aoc_pheap_map(buffer, ctx, true);
+}
+
+static void aoc_pheap_free_cb(struct samsung_dma_buffer *buffer, void *ctx)
+{
+	aoc_pheap_map(buffer, ctx, false);
+}
+
+static struct dma_heap *aoc_create_dma_buf_heap(struct aoc_prvdata *prvdata, const char *name,
+						phys_addr_t base, size_t size)
+{
+	struct device *dev = prvdata->dev;
+	size_t align = SZ_16K;
+	struct dma_heap *heap;
+
+	heap = ion_physical_heap_create(base, size, align, name, aoc_pheap_alloc_cb,
+					aoc_pheap_free_cb, dev);
+	if (IS_ERR(heap))
+		dev_err(dev, "heap \"%s\" creation failure: %ld\n", name, PTR_ERR(heap));
+
+	return heap;
+}
+
+bool aoc_create_dma_buf_heaps(struct aoc_prvdata *prvdata)
+{
+	phys_addr_t base = prvdata->dram_resource.start + resource_size(&prvdata->dram_resource);
+
+	if (resource_size(&prvdata->dram_resource) < SENSOR_DIRECT_HEAP_SIZE +
+			PLAYBACK_HEAP_SIZE + CAPTURE_HEAP_SIZE)
+		return false;
+
+	base -= SENSOR_DIRECT_HEAP_SIZE;
+	prvdata->sensor_heap = aoc_create_dma_buf_heap(prvdata, "sensor_direct_heap",
+						       base, SENSOR_DIRECT_HEAP_SIZE);
+	prvdata->sensor_heap_base = base;
+	if (IS_ERR(prvdata->sensor_heap))
+		return false;
+
+	base -= PLAYBACK_HEAP_SIZE;
+	prvdata->audio_playback_heap = aoc_create_dma_buf_heap(prvdata, "aaudio_playback_heap",
+							       base, PLAYBACK_HEAP_SIZE);
+	prvdata->audio_playback_heap_base = base;
+	if (IS_ERR(prvdata->audio_playback_heap))
+		return false;
+
+	base -= CAPTURE_HEAP_SIZE;
+	prvdata->audio_capture_heap = aoc_create_dma_buf_heap(prvdata, "aaudio_capture_heap",
+							      base, CAPTURE_HEAP_SIZE);
+	prvdata->audio_capture_heap_base = base;
+	if (IS_ERR(prvdata->audio_capture_heap))
+		return false;
+
+	return true;
+}
+
+long aoc_unlocked_ioctl_handle_ion_fd(unsigned int cmd, unsigned long arg)
+{
+	struct aoc_ion_handle handle;
+	struct dma_buf *dmabuf;
+	struct samsung_dma_buffer *dma_heap_buf;
+	long ret = -EINVAL;
+
+	BUILD_BUG_ON(sizeof(struct aoc_ion_handle) !=
+				_IOC_SIZE(AOC_IOCTL_ION_FD_TO_HANDLE));
+
+	if (copy_from_user(&handle, (struct aoc_ion_handle *)arg, _IOC_SIZE(cmd)))
+		return ret;
+
+	dmabuf = dma_buf_get(handle.fd);
+	if (IS_ERR(dmabuf))
+		 return -EINVAL;
+
+	dma_heap_buf = dmabuf->priv;
+	handle.handle = (u64)dma_heap_buf->priv;
+
+	dma_buf_put(dmabuf);
+
+	if (!copy_to_user((struct aoc_ion_handle *)arg, &handle, _IOC_SIZE(cmd)))
+		ret = 0;
+
+	return ret;
 }
 
 static int platform_probe_parse_dt(struct device *dev, struct device_node *aoc_node)
