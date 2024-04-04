@@ -1689,6 +1689,27 @@ void trigger_aoc_ssr(bool ap_triggered_reset, char *reset_reason) {
 	}
 }
 
+static void prepend_fw_builder_to_crash_string(struct aoc_prvdata *prvdata, char *crash_info,
+									size_t max_len) {
+	char *fw_builder;
+	size_t prefix_size;
+
+	if (glob_match("*[0-9]-*[a-zA-Z]", prvdata->firmware_version)) {
+		fw_builder = strchrnul(prvdata->firmware_version, '-');
+		fw_builder = strchrnul(fw_builder, '-');
+		fw_builder++;
+	} else {
+		fw_builder = "Unknown";
+	}
+
+	prefix_size = strlen(fw_builder) + 3;
+	memmove(crash_info + prefix_size, crash_info, max_len - prefix_size);
+	crash_info[0] = '[';
+	strcpy(&crash_info[1], fw_builder);
+	crash_info[prefix_size - 2] = ']';
+	crash_info[prefix_size - 1] = ' ';
+}
+
 static void aoc_watchdog(struct work_struct *work)
 {
 	struct aoc_prvdata *prvdata =
@@ -1852,6 +1873,9 @@ static void aoc_watchdog(struct work_struct *work)
 
 	if (crash_info[0] == 0)
 		strscpy(crash_info, "AoC Watchdog: empty crash info string", sizeof(crash_info));
+
+	prepend_fw_builder_to_crash_string(prvdata, crash_info,
+			RAMDUMP_SECTION_CRASH_INFO_SIZE);
 
 	dev_info(prvdata->dev, "aoc crash info: [%s]", crash_info);
 
