@@ -8,9 +8,8 @@
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
  */
-#if IS_ENABLED(CONFIG_SOC_ZUMAPRO)
-  #include "aoc-interface-zumapro.h"
-#elif IS_ENABLED(CONFIG_SOC_ZUMA)
+
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
   #include "aoc-interface-zuma.h"
 #elif IS_ENABLED(CONFIG_SOC_GS201)
   #include "aoc-interface-gs201.h"
