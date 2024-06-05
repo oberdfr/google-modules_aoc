@@ -4096,3 +4096,13 @@ int aoc_audio_mic_mask_set(struct aoc_chip *chip, bool is_voice)
 
 	return aoc_audio_set_parameters(cmd_id, block, component, key, value, chip);
 }
+
+int aoc_multichannel_processor_switch_set(struct aoc_chip *chip, int value)
+{
+	const int cmd_id = CMD_AUDIO_OUTPUT_SET_PARAMETER_ID;
+	const int block = 22; /* ABLOCK_MCPROC */
+	const int component = 43; /* ASP_ID_MC_PP */
+	const int paramid = 0; /* parameter ID for the active module */
+
+	return aoc_audio_set_parameters(cmd_id, block, component, paramid, value, chip);
+}

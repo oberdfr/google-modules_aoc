@@ -313,6 +313,7 @@ struct aoc_chip {
 #if IS_ENABLED(CONFIG_SOC_ZUMA)
 	int mel_enable;
 #endif
+	int multichannel_processor;
 
 	bool hotword_supported;
 	bool chre_supported;
@@ -499,6 +500,8 @@ int aoc_set_usb_feedback_endpoint(struct aoc_chip *chip, struct usb_device *udev
 int aoc_set_usb_offload_state(struct aoc_chip *chip, bool offload_enable);
 
 int aoc_set_usb_mem_config(struct aoc_chip *achip);
+
+int aoc_multichannel_processor_switch_set(struct aoc_chip *achip, int value);
 
 int aoc_audio_write(struct aoc_alsa_stream *alsa_stream, void *src,
 		    uint32_t count);
