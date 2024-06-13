@@ -1136,6 +1136,38 @@ static int voice_pcm_wait_time_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int multichannel_processor_ctl_get(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	ucontrol->value.integer.value[0] = chip->multichannel_processor;
+
+	mutex_unlock(&chip->audio_mutex);
+
+	return 0;
+}
+
+static int multichannel_processor_ctl_set(struct snd_kcontrol *kcontrol,
+					       struct snd_ctl_elem_value *ucontrol)
+{
+	struct aoc_chip *chip = snd_kcontrol_chip(kcontrol);
+	int err = 0;
+
+	if (mutex_lock_interruptible(&chip->audio_mutex))
+		return -EINTR;
+
+	chip->multichannel_processor = ucontrol->value.integer.value[0];
+
+	err = aoc_multichannel_processor_switch_set(chip, chip->multichannel_processor);
+
+	mutex_unlock(&chip->audio_mutex);
+	return err;
+}
+
 #if IS_ENABLED(CONFIG_SOC_ZUMA)
 static int audio_mel_enable_ctl_get(struct snd_kcontrol *kcontrol,
 					       struct snd_ctl_elem_value *ucontrol)
@@ -2662,6 +2694,9 @@ static struct snd_kcontrol_new snd_aoc_ctl[] = {
 	SOC_SINGLE_EXT("Displayport Audio Start Threshold", SND_SOC_NOPM, 0,
 			MAX_DP_START_THRESHOLD, 0,
 			dp_start_threshold_get, dp_start_threshold_set),
+
+	SOC_SINGLE_EXT("MultiChannel Processor Switch", SND_SOC_NOPM, 0, INT_MAX, 0,
+			multichannel_processor_ctl_get, multichannel_processor_ctl_set),
 
 #if IS_ENABLED(CONFIG_SOC_ZUMA)
 	SOC_SINGLE_EXT("Mel Processor Enable", SND_SOC_NOPM, 0, 1, 0,
