@@ -297,7 +297,6 @@ struct aoc_chip {
 	int chirp_gain;
 	int chre_src_gain[CHRE_GAIN_PATH_TOT];
 	int chre_src_aec_timeout;
-	int hdmic_gain;
 	int incall_mic_gain_current;
 	int incall_mic_gain_target;
 	bool incall_mic_muted;
@@ -521,8 +520,6 @@ int aoc_audio_set_chirp_parameter(struct aoc_chip *chip, int key, int value);
 int aoc_audio_set_chre_src_pdm_gain(struct aoc_chip *chip, int gain);
 int aoc_audio_set_chre_src_aec_gain(struct aoc_chip *chip, int gain);
 int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout);
-
-int aoc_audio_set_hdmic_gain(struct aoc_chip *chip, int gain);
 
 int prepare_phonecall(struct aoc_alsa_stream *alsa_stream);
 int teardown_phonecall(struct aoc_alsa_stream *alsa_stream);

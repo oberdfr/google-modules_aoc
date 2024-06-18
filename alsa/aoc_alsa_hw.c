@@ -4089,25 +4089,6 @@ int aoc_audio_set_chre_src_aec_timeout(struct aoc_chip *chip, int timeout)
 	}
 }
 
-#if !(IS_ENABLED(CONFIG_SOC_GS101) || IS_ENABLED(CONFIG_SOC_GS201))
-int aoc_audio_set_hdmic_gain(struct aoc_chip *chip, int gain)
-{
-	int err;
-	struct CMD_AUDIO_INPUT_SET_HDMIC_GAIN cmd;
-
-	AocCmdHdrSet(&cmd.parent, CMD_AUDIO_INPUT_SET_HDMIC_GAIN_ID,
-			sizeof(cmd));
-	cmd.gain_centibel = gain;
-
-	err = aoc_audio_control(CMD_INPUT_CHANNEL, (uint8_t *)&cmd,
-				sizeof(cmd), (uint8_t *)&cmd, chip);
-	if (err < 0)
-		pr_err("ERR:%d in AoC set HDMIC gain\n", err);
-
-	return err < 0 ? err : 0;
-}
-#endif
-
 /* Update PDM mic mask */
 int aoc_audio_mic_mask_set(struct aoc_chip *chip, bool is_voice)
 {
