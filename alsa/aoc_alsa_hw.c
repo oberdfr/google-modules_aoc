@@ -3721,6 +3721,9 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 	cmd.address = 0;
 	cmd.size = 0;
 
+	memcpy(cmd.cfg.options, alsa_stream->compr_offload_codec_options,
+		sizeof(cmd.cfg.options));
+
 	pr_info("%s type=%d format=%d sr=%d chan=%d\n", __func__, type, cmd.cfg.format,
 		cmd.cfg.samplerate, cmd.cfg.channels);
 
