@@ -176,7 +176,7 @@ static int aoc_audio_stream_type[] = {
 	[15] = NORMAL, [16] = NORMAL,  [17] = NORMAL,	   [18] = INCALL, [19] = INCALL,
 	[20] = INCALL, [21] = INCALL,  [22] = INCALL,	   [23] = MMAPED, [24] = NORMAL,
 	[25] = HIFI,   [26] = HIFI,    [27] = ANDROID_AEC, [28] = MMAPED, [29] = INCALL,
-	[30] = NORMAL, [31] = CAP_INJ, [32] = HOTWORD_TAP, [33] = INCALL,
+	[30] = NORMAL, [31] = CAP_INJ, [32] = HOTWORD_TAP, [54] = INCALL,
 };
 
 int aoc_pcm_device_to_stream_type(int device)
