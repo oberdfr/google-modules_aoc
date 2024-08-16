@@ -32,7 +32,11 @@ extern struct be_path_cache port_array[PORT_MAX];
  * by sink-associated devices such as spker, headphone, bt, usb, mode
  */
 static int aoc_audio_sink[] = {
+#if IS_ENABLED(CONFIG_SOC_GS101)
 	[PORT_I2S_0_RX] = SINK_HEADPHONE, [PORT_I2S_0_TX] = -1,
+#else
+	[PORT_I2S_0_RX] = SINK_UNUSED, [PORT_I2S_0_TX] = -1,
+#endif
 	[PORT_I2S_1_RX] = SINK_BT,        [PORT_I2S_1_TX] = -1,
 	[PORT_I2S_2_RX] = SINK_USB,       [PORT_I2S_2_TX] = -1,
 	[PORT_TDM_0_RX] = SINK_SPEAKER,   [PORT_TDM_0_TX] = -1,
@@ -3716,6 +3720,9 @@ int aoc_compr_offload_setup(struct aoc_alsa_stream *alsa_stream, int type)
 	cmd.cfg.channels = alsa_stream->channels;
 	cmd.address = 0;
 	cmd.size = 0;
+
+	memcpy(cmd.cfg.options, alsa_stream->compr_offload_codec_options,
+		sizeof(cmd.cfg.options));
 
 	pr_info("%s type=%d format=%d sr=%d chan=%d\n", __func__, type, cmd.cfg.format,
 		cmd.cfg.samplerate, cmd.cfg.channels);
